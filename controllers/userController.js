@@ -14,6 +14,7 @@ const {
   maskSensitiveUserFields,
   maskSensitiveUserList,
 } = require('../utils/sensitiveUserFields');
+const { releaseLockIfCheckedInToday } = require('../services/missedAttendanceLockService');
 
 const withProfileCompletion = (user) => {
   const obj = typeof user.toObject === 'function' ? user.toObject() : { ...user };
@@ -113,6 +114,7 @@ const userController = {
 
       if (!user) return res.status(404).json({ message: 'User not found' });
 
+      await releaseLockIfCheckedInToday(user);
       await unlockIfProfileComplete(user);
 
       res.json(maskSensitiveUserFields(withProfileCompletion(user), req.user));
@@ -203,6 +205,7 @@ const userController = {
     try {
       const user = await User.findById(req.user._id).select('-password');
       if (!user) return res.status(404).json({ error: 'User not found' });
+      await releaseLockIfCheckedInToday(user);
       await unlockIfProfileComplete(user);
       res.json(maskSensitiveUserFields(withProfileCompletion(user), req.user));
     } catch (error) {

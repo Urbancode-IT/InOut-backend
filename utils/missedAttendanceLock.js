@@ -100,7 +100,8 @@ const leaveCoversDateKey = (leave, dateKey) => {
   return from <= end && to >= start;
 };
 
-const shouldLockMissedDay = ({ hasCheckIn, hasCheckOut, hasLeave, waived }) => {
+const shouldLockMissedDay = ({ hasCheckIn, hasCheckOut, hasLeave, waived, checkedInToday = false }) => {
+  if (checkedInToday) return false;
   if (waived) return false;
   if (hasCheckIn || hasCheckOut || hasLeave) return false;
   return true;

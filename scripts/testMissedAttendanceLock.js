@@ -71,6 +71,16 @@ function run() {
       true
     );
     assert.strictEqual(
+      shouldLockMissedDay({
+        hasCheckIn: false,
+        hasCheckOut: false,
+        hasLeave: false,
+        waived: false,
+        checkedInToday: true,
+      }),
+      false
+    );
+    assert.strictEqual(
       shouldLockMissedDay({ hasCheckIn: true, hasCheckOut: false, hasLeave: false, waived: false }),
       false
     );
