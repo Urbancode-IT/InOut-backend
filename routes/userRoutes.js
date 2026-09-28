@@ -14,6 +14,7 @@ router.get('/', auth, userController.getAllUsers);
 
 // ✅ GET my profile (logged in user)
 router.get('/me', auth, userController.getLoggedInUser);
+router.post('/me/inout-unlock-seen', auth, userController.acknowledgeInoutUnlockNotice);
 
 
 router.get('/profile',auth,userController.getProfile);

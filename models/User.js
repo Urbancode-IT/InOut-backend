@@ -156,6 +156,31 @@ const UserSchema = new mongoose.Schema({
     default: null,
   },
 
+  // Missed check-in + check-out + leave. Only an admin can clear this.
+  inoutBlocked: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+  inoutBlockedAt: {
+    type: Date,
+    default: null,
+  },
+  inoutBlockedForDate: {
+    type: String,
+    default: null,
+  },
+  // Admin unlock for this IST date so the same missed day is not locked again.
+  inoutLockWaivedForDate: {
+    type: String,
+    default: null,
+  },
+  // Shown once on the employee's next login after an admin unlock.
+  inoutUnlockNoticePending: {
+    type: Boolean,
+    default: false,
+  },
+
   // If true, skip 10 AM / 6 PM / 8 PM attendance reminder emails
   skipAttendanceReminders: {
     type: Boolean,

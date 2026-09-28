@@ -117,6 +117,14 @@ async function startServer() {
       console.error('Attendance reminder scheduler failed to start:', schedErr.message);
     }
 
+    // Lock In-Out after the workday when check-in, check-out, and leave are all missing
+    try {
+      const { startMissedAttendanceLockScheduler } = require('./jobs/missedAttendanceLockScheduler');
+      startMissedAttendanceLockScheduler();
+    } catch (schedErr) {
+      console.error('Missed attendance lock scheduler failed to start:', schedErr.message);
+    }
+
     // Monthly attendance + payslip emails (1st of month 10:00 Asia/Kolkata)
     try {
       const { startMonthlyReportScheduler } = require('./jobs/monthlyReportScheduler');

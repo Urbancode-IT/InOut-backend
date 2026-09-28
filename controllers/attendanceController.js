@@ -18,6 +18,10 @@ const {
 } = require('../utils/attendanceQuery');
 const { applyProfileGateOnCheckIn } = require('../utils/profileCompletion');
 const { validateMarkAttendance } = require('../utils/attendanceGuard');
+const {
+  INOUT_BLOCKED_MESSAGE,
+  ensureUserMissedDayLock,
+} = require('../services/missedAttendanceLockService');
 const { saveAttendanceImageInBackground, uploadAttendanceImageNow } = require('../middleware/upload');
 
 const resolveAttendanceUserIds = async (userId) => {
@@ -147,10 +151,21 @@ exports.markAttendance = async (req, res) => {
     }
 
     const profileSelect =
-      'branch address bankDetails bloodGroup dateOfBirth dateOfJoining skills rolesAndResponsibility company position profileIncompleteSince attendanceLocked attendanceLockedAt';
+      'branch address bankDetails bloodGroup dateOfBirth dateOfJoining dateOfRelieving role position works isActive skills rolesAndResponsibility company profileIncompleteSince attendanceLocked attendanceLockedAt inoutBlocked inoutBlockedAt inoutBlockedForDate inoutLockWaivedForDate employeeId email';
     const user = await User.findById(req.user._id).select(profileSelect);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    await ensureUserMissedDayLock(user);
+    if (user.inoutBlocked) {
+      return res.status(403).json({
+        error: 'In-Out locked',
+        code: 'INOUT_BLOCKED',
+        message: INOUT_BLOCKED_MESSAGE,
+        inoutBlocked: true,
+        inoutBlockedForDate: user.inoutBlockedForDate,
+      });
     }
 
     let profileGate = {

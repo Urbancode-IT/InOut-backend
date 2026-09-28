@@ -15,6 +15,7 @@ router.get('/letters', auth, role('admin'), adminController.getAllLetters);
 // Force PDF download via API proxy (avoids browser/Cloudinary delivery quirks)
 router.get('/letters/download', auth, role('admin'), adminController.downloadLetter);
 router.post('/users/:id/unlock-attendance', auth, role('admin'), adminController.unlockAttendance);
+router.put('/users/:id/unlock-attendance', auth, role('admin'), adminController.unlockAttendance);
 router.post('/monthly-reports/send', auth, role('admin'), adminController.triggerMonthlyReports);
 
 module.exports = router;

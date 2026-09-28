@@ -68,6 +68,10 @@ const userController = {
         attendanceLocked: 1,
         profileIncompleteSince: 1,
         attendanceLockedAt: 1,
+        inoutBlocked: 1,
+        inoutBlockedAt: 1,
+        inoutBlockedForDate: 1,
+        inoutLockWaivedForDate: 1,
         skipAttendanceReminders: 1,
         createdAt: 1,
         updatedAt: 1
@@ -203,6 +207,19 @@ const userController = {
       res.json(maskSensitiveUserFields(withProfileCompletion(user), req.user));
     } catch (error) {
       console.error('Error fetching user:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  acknowledgeInoutUnlockNotice: async (req, res) => {
+    try {
+      const user = await User.findById(req.user._id);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      user.inoutUnlockNoticePending = false;
+      await user.save();
+      res.json({ inoutUnlockNoticePending: false });
+    } catch (error) {
+      console.error('Error clearing In-Out unlock notice:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   },

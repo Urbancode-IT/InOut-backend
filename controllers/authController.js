@@ -36,7 +36,8 @@ const authController = {
         token,
         userId: user._id,
         role: user.role,
-        name: user.name
+        name: user.name,
+        inoutUnlockNotice: user.inoutUnlockNoticePending === true,
       });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });

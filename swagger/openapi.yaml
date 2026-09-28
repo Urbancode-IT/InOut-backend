@@ -414,7 +414,7 @@ paths:
     post:
       tags: [Admin]
       summary: Unlock attendance for a locked user
-      description: Admin-only. Clears attendanceLocked and restarts the profile-incomplete grace period.
+      description: Admin-only. Clears profile attendance lock and missed-day In-Out lock. Employees cannot unlock themselves.
       parameters:
         - name: id
           in: path

@@ -340,6 +340,8 @@ const adminController = {
       user.attendanceLockedAt = null;
       // Restart grace tracking from next incomplete check-in
       user.profileIncompleteSince = null;
+      const { clearInoutBlock } = require('../utils/missedAttendanceLock');
+      clearInoutBlock(user);
       await user.save();
 
       res.json({
@@ -347,6 +349,9 @@ const adminController = {
         userId: String(user._id),
         attendanceLocked: user.attendanceLocked,
         profileIncompleteSince: user.profileIncompleteSince,
+        inoutBlocked: user.inoutBlocked,
+        inoutBlockedForDate: user.inoutBlockedForDate,
+        inoutLockWaivedForDate: user.inoutLockWaivedForDate,
       });
     } catch (err) {
       console.error('Error unlocking attendance:', err);
