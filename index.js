@@ -13,12 +13,19 @@ const app = express();
 app.use(cors({
   origin(origin, callback) {
     if (!origin) return callback(null, true);
-    if (origin === 'https://inout.urbancode.tech') return callback(null, true);
-    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return callback(null, true);
-    return callback(null, false);
+    const lower = origin.toLowerCase();
+    if (
+      lower.includes('urbancode.tech') ||
+      lower.includes('urbancode') ||
+      lower.includes('localhost') ||
+      lower.includes('127.0.0.1')
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, true);
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma', 'X-Requested-With'],
   credentials: true,
 }));
 app.use(express.json());
