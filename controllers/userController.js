@@ -384,31 +384,53 @@ const userController = {
 
       let fileUrl = '';
       if (file.buffer) {
-        const cloudinary = require('../config/cloudinary');
-        const streamUpload = (buffer, options) => new Promise((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
-            if (result) resolve(result);
-            else reject(error);
+        try {
+          const cloudinary = require('../config/cloudinary');
+          const streamUpload = (buffer, options) => new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
+              if (result) resolve(result);
+              else reject(error);
+            });
+            const { Readable } = require('stream');
+            const readable = new Readable();
+            readable._read = () => {};
+            readable.push(buffer);
+            readable.push(null);
+            readable.pipe(stream);
           });
-          const { Readable } = require('stream');
-          const readable = new Readable();
-          readable._read = () => {};
-          readable.push(buffer);
-          readable.push(null);
-          readable.pipe(stream);
-        });
 
-        const isPdf = file.mimetype === 'application/pdf' || (file.originalname || '').toLowerCase().endsWith('.pdf');
-        const baseName = (file.originalname || 'aadhar').replace(/[^a-zA-Z0-9_-]/g, '_');
-        const opts = {
-          folder: `aadhar_cards/${userId}`,
-          resource_type: 'image',
-          ...(isPdf ? { format: 'pdf' } : {}),
-          public_id: `${baseName}_${Date.now()}`,
-          type: 'upload',
-        };
-        const result = await streamUpload(file.buffer, opts);
-        fileUrl = result.secure_url || result.url;
+          const isPdf = file.mimetype === 'application/pdf' || (file.originalname || '').toLowerCase().endsWith('.pdf');
+          const baseName = (file.originalname || 'aadhar').replace(/[^a-zA-Z0-9_-]/g, '_');
+          const opts = {
+            folder: `aadhar_cards/${userId}`,
+            resource_type: isPdf ? 'auto' : 'image',
+            public_id: `${baseName}_${Date.now()}`,
+            type: 'upload',
+          };
+          const result = await streamUpload(file.buffer, opts);
+          fileUrl = result.secure_url || result.url;
+        } catch (cloudErr) {
+          console.error('Cloudinary upload error:', cloudErr.message);
+        }
+
+        // Fallback to local static storage if Cloudinary keys/upload fails
+        if (!fileUrl) {
+          const fs = require('fs');
+          const path = require('path');
+          const uploadsDir = path.join(__dirname, '../uploads/aadhar_cards');
+          if (!fs.existsSync(uploadsDir)) {
+            fs.mkdirSync(uploadsDir, { recursive: true });
+          }
+          const ext = path.extname(file.originalname || '.png') || '.png';
+          const fileName = `aadhar-${userId}-${Date.now()}${ext}`;
+          const filePath = path.join(uploadsDir, fileName);
+          fs.writeFileSync(filePath, file.buffer);
+          
+          const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+          const host = req.headers['x-forwarded-host'] || req.get('host') || 'api.inout.urbancode.tech';
+          fileUrl = `${protocol}://${host}/uploads/aadhar_cards/${fileName}`;
+          console.log('Saved Aadhaar card to local fallback storage:', fileUrl);
+        }
       } else {
         fileUrl = file.path || file.location || file.url;
       }
