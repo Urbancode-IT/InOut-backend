@@ -64,6 +64,8 @@ const userController = {
         uan: 1,
         esiNumber: 1,
         empGrade: 1,
+        aadharNumber: 1,
+        aadharCard: 1,
         adminComments: 1,
         employeeId: 1,
         attendanceLocked: 1,
@@ -162,6 +164,7 @@ const userController = {
         pan,
         uan,
         esiNumber,
+        aadharNumber,
       } = req.body;
 
       const updateData = {};
@@ -183,6 +186,7 @@ const userController = {
       if (pan !== undefined) updateData.pan = pan;
       if (uan !== undefined) updateData.uan = uan;
       if (esiNumber !== undefined) updateData.esiNumber = esiNumber;
+      if (aadharNumber !== undefined) updateData.aadharNumber = aadharNumber;
     if (dateOfJoining) updateData.dateOfJoining = new Date(dateOfJoining);
     if (dateOfBirth) updateData.dateOfBirth = new Date(dateOfBirth);
     if (dateOfRelieving) updateData.dateOfRelieving = new Date(dateOfRelieving);
@@ -259,6 +263,7 @@ const userController = {
       uan,
       esiNumber,
       empGrade,
+      aadharNumber,
     } = req.body;
 
     const updateData = {};
@@ -299,6 +304,7 @@ const userController = {
     if (uan !== undefined) updateData.uan = uan;
     if (esiNumber !== undefined) updateData.esiNumber = esiNumber;
     if (empGrade !== undefined) updateData.empGrade = empGrade;
+    if (aadharNumber !== undefined) updateData.aadharNumber = aadharNumber;
 
     const updatedUser = await User.findByIdAndUpdate(
       req.params.id,
@@ -363,6 +369,40 @@ const userController = {
       res.json(maskSensitiveUserFields(updated, req.user));
     } catch (error) {
       console.error('Error uploading profile picture:', error);
+      res.status(500).json({ message: error.message });
+    }
+  },
+
+  // Upload Aadhar card image or document and save to user.aadharCard
+  uploadAadharCard: async (req, res) => {
+    try {
+      const userId = req.body.userId || (req.user && req.user._id) || null;
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+      const fileUrl = req.file && (req.file.path || req.file.location || req.file.url);
+      if (!fileUrl) return res.status(400).json({ message: 'No file uploaded' });
+
+      const aadharCardObj = {
+        url: fileUrl,
+        filename: req.file.originalname || 'aadhar_card',
+        uploadedAt: new Date(),
+      };
+
+      const updated = await User.findByIdAndUpdate(
+        userId,
+        { aadharCard: aadharCardObj },
+        { new: true }
+      ).select('-password');
+
+      if (!updated) return res.status(404).json({ message: 'User not found' });
+
+      res.json({
+        message: 'Aadhar card uploaded successfully',
+        aadharCard: updated.aadharCard,
+        user: maskSensitiveUserFields(updated, req.user),
+      });
+    } catch (error) {
+      console.error('Error uploading Aadhar card:', error);
       res.status(500).json({ message: error.message });
     }
   },

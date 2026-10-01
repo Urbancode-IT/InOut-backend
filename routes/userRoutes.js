@@ -19,8 +19,13 @@ router.post('/me/inout-unlock-seen', auth, userController.acknowledgeInoutUnlock
 
 router.get('/profile',auth,userController.getProfile);
 
+const { uploadAadharCard } = require('../middleware/uploadAadhar');
+
 // Upload profile picture (JPG/PNG, max 2MB → Cloudinary under profile_pictures/<userId>)
 router.post('/profile/upload', auth, uploadProfilePic, userController.uploadProfilePic);
+
+// Upload Aadhar card image (JPG/PNG/PDF, max 5MB → Cloudinary under aadhar_cards/<userId>)
+router.post('/profile/upload-aadhar', auth, uploadAadharCard, userController.uploadAadharCard);
 
 // Upload generated letter PDF and store in Cloudinary under letter_copies/<candidateId>
 router.post('/letters/upload', auth, uploadLetter, userController.uploadLetter);

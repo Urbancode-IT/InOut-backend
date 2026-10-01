@@ -16,6 +16,12 @@ const PRESETS = {
     typeLabel: 'PDF',
     maxLabel: '5MB',
   },
+  aadharCard: {
+    allowedMimes: ['image/jpeg', 'image/png', 'application/pdf'],
+    maxBytes: 5 * MB,
+    typeLabel: 'JPG, PNG or PDF',
+    maxLabel: '5MB',
+  },
 };
 
 function resolvePreset(preset) {

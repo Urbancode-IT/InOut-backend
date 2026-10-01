@@ -121,6 +121,12 @@ const UserSchema = new mongoose.Schema({
   uan: { type: String, default: '' },
   esiNumber: { type: String, default: '' },
   empGrade: { type: String, default: '' },
+  aadharNumber: { type: String, default: '' },
+  aadharCard: {
+    url: { type: String, default: '' },
+    filename: { type: String, default: '' },
+    uploadedAt: { type: Date }
+  },
   // Sequential employee identifier (e.g. UC0001, JZ0001)
   employeeId: {
     type: String,
