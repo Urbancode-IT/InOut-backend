@@ -379,12 +379,42 @@ const userController = {
       const userId = req.body.userId || (req.user && req.user._id) || null;
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
-      const fileUrl = req.file && (req.file.path || req.file.location || req.file.url);
-      if (!fileUrl) return res.status(400).json({ message: 'No file uploaded' });
+      const file = req.file;
+      if (!file) return res.status(400).json({ message: 'No file uploaded' });
+
+      let fileUrl = '';
+      if (file.buffer) {
+        const cloudinary = require('../config/cloudinary');
+        const streamUpload = (buffer, options) => new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
+            if (result) resolve(result);
+            else reject(error);
+          });
+          const { Readable } = require('stream');
+          const readable = new Readable();
+          readable._read = () => {};
+          readable.push(buffer);
+          readable.push(null);
+          readable.pipe(stream);
+        });
+
+        const isPdf = file.mimetype === 'application/pdf' || (file.originalname || '').toLowerCase().endsWith('.pdf');
+        const opts = {
+          folder: `aadhar_cards/${userId}`,
+          resource_type: 'auto',
+          type: 'upload',
+        };
+        const result = await streamUpload(file.buffer, opts);
+        fileUrl = result.secure_url || result.url;
+      } else {
+        fileUrl = file.path || file.location || file.url;
+      }
+
+      if (!fileUrl) return res.status(400).json({ message: 'Failed to process file upload' });
 
       const aadharCardObj = {
         url: fileUrl,
-        filename: req.file.originalname || 'aadhar_card',
+        filename: file.originalname || 'aadhar_card',
         uploadedAt: new Date(),
       };
 
