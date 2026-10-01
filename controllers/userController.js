@@ -399,9 +399,12 @@ const userController = {
         });
 
         const isPdf = file.mimetype === 'application/pdf' || (file.originalname || '').toLowerCase().endsWith('.pdf');
+        const baseName = (file.originalname || 'aadhar').replace(/[^a-zA-Z0-9_-]/g, '_');
         const opts = {
           folder: `aadhar_cards/${userId}`,
-          resource_type: 'auto',
+          resource_type: 'image',
+          ...(isPdf ? { format: 'pdf' } : {}),
+          public_id: `${baseName}_${Date.now()}`,
           type: 'upload',
         };
         const result = await streamUpload(file.buffer, opts);
