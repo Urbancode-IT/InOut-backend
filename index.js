@@ -40,6 +40,7 @@ app.use('/uploads', express.static(uploadsPath, {
       '.jpeg': 'image/jpeg',
       '.png': 'image/png',
       '.webp': 'image/webp',
+      '.pdf': 'application/pdf',
     };
     res.setHeader('Content-Type', types[ext] || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400');

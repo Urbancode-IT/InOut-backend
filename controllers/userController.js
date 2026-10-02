@@ -403,12 +403,16 @@ const userController = {
           const baseName = (file.originalname || 'aadhar').replace(/[^a-zA-Z0-9_-]/g, '_');
           const opts = {
             folder: `aadhar_cards/${userId}`,
-            resource_type: isPdf ? 'auto' : 'image',
+            resource_type: 'image',
+            ...(isPdf ? { format: 'png' } : {}),
             public_id: `${baseName}_${Date.now()}`,
             type: 'upload',
           };
           const result = await streamUpload(file.buffer, opts);
           fileUrl = result.secure_url || result.url;
+          if (fileUrl && fileUrl.includes('cloudinary.com') && /\.pdf$/i.test(fileUrl)) {
+            fileUrl = fileUrl.replace(/\.pdf$/i, '.png');
+          }
         } catch (cloudErr) {
           console.error('Cloudinary upload error:', cloudErr.message);
         }
