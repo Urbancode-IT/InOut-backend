@@ -284,8 +284,8 @@ const userController = {
     if (dateOfJoining !== undefined && dateOfJoining !== null && dateOfJoining !== '') {
       updateData.dateOfJoining = new Date(dateOfJoining);
     }
-    if (dateOfBirth !== undefined && dateOfBirth !== null && dateOfBirth !== '') {
-      updateData.dateOfBirth = new Date(dateOfBirth);
+    if (dateOfBirth !== undefined) {
+      updateData.dateOfBirth = (dateOfBirth && dateOfBirth !== '') ? new Date(dateOfBirth) : null;
     }
     if (dateOfRelieving !== undefined) {
       updateData.dateOfRelieving = dateOfRelieving ? new Date(dateOfRelieving) : null;
