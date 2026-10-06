@@ -391,7 +391,11 @@ const adminController = {
         to: toEmail.trim(),
         subject: subject || 'Document from Admin',
         text: text || 'Please find attached your requested document.',
-        html: html || `<div style="font-family: Arial, sans-serif; color: #333;"><p>Dear Recipient,</p><p>${(text || 'Please find attached your document.').replace(/\n/g, '<br/>')}</p><p>Regards,<br/><strong>Admin Team</strong></p></div>`,
+        html: html || `<div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 24px;">
+          <p>${(text || 'Please find attached your document.').replace(/\n/g, '<br/>')}</p>
+          <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+          <p style="font-size: 12px; color: #888;">This is an automated email from Urbancode Edutech Solutions Pvt. Ltd. Please do not reply to this email.</p>
+        </div>`,
         attachments,
       };
 
