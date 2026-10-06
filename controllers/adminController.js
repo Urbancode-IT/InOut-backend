@@ -363,6 +363,48 @@ const adminController = {
    * Manually trigger previous-month attendance + payslip emails.
    * Query: dryRun=true | force=true | userId=<id>
    */
+  sendDocumentEmail: async (req, res) => {
+    try {
+      const { toEmail, subject, text, html, pdfBase64, filename } = req.body;
+
+      if (!toEmail || typeof toEmail !== 'string' || !toEmail.trim()) {
+        return res.status(400).json({ error: 'Recipient email address (toEmail) is required' });
+      }
+
+      const transporter = require('../config/emailConfig');
+      transporter.assertEmailConfigured();
+
+      const fromAddress = transporter.getSenderFromAddress();
+
+      const attachments = [];
+      if (pdfBase64) {
+        const cleanBase64 = String(pdfBase64).replace(/^data:application\/pdf;base64,/, '');
+        attachments.push({
+          filename: filename || 'document.pdf',
+          content: Buffer.from(cleanBase64, 'base64'),
+          contentType: 'application/pdf',
+        });
+      }
+
+      const mailOptions = {
+        from: fromAddress,
+        to: toEmail.trim(),
+        subject: subject || 'Document from Admin',
+        text: text || 'Please find attached your requested document.',
+        html: html || `<div style="font-family: Arial, sans-serif; color: #333;"><p>Dear Recipient,</p><p>${(text || 'Please find attached your document.').replace(/\n/g, '<br/>')}</p><p>Regards,<br/><strong>Admin Team</strong></p></div>`,
+        attachments,
+      };
+
+      const info = await transporter.sendMail(mailOptions);
+      console.log(`Document email sent successfully to ${toEmail}:`, info.messageId);
+
+      return res.json({ message: 'Email sent successfully', messageId: info.messageId });
+    } catch (error) {
+      console.error('Error sending document email:', error);
+      return res.status(500).json({ error: error.message || 'Failed to send email' });
+    }
+  },
+
   triggerMonthlyReports: async (req, res) => {
     try {
       const { runMonthlyReports } = require('../services/monthlyReportService');

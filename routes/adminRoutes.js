@@ -18,4 +18,6 @@ router.post('/users/:id/unlock-attendance', auth, role('admin'), adminController
 router.put('/users/:id/unlock-attendance', auth, role('admin'), adminController.unlockAttendance);
 router.post('/monthly-reports/send', auth, role('admin'), adminController.triggerMonthlyReports);
 
+router.post('/send-document-email', auth, role('admin'), adminController.sendDocumentEmail);
+
 module.exports = router;
