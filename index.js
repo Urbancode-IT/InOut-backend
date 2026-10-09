@@ -166,6 +166,14 @@ async function startServer() {
       console.error('New user welcome scheduler failed to start:', schedErr.message);
     }
 
+
+    // Holiday notice to uc_jz team chat at 4:00 PM IST (day before a holiday)
+    try {
+      const { startHolidayNoticeScheduler } = require('./jobs/holidayNoticeScheduler');
+      startHolidayNoticeScheduler();
+    } catch (schedErr) {
+      console.error('Holiday notice scheduler failed to start:', schedErr.message);
+    }
     const port = process.env.PORT || 5000;
     app.listen(port, () => console.log(`Server running on port ${port}`));
   } catch (err) {
