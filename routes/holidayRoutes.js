@@ -4,6 +4,9 @@ const auth = require('../middleware/auth');
 const role = require('../middleware/role');
 const holidayController = require('../controllers/holidayController');
 
+// Public (all authenticated users) — employees need this to show holidays on their calendar
+router.get('/public', auth, holidayController.getHolidays);
+
 router.get('/', auth, role('admin'), holidayController.getAllHolidays);
 router.post('/', auth, role('admin'), holidayController.createHoliday);
 router.get('/filter', auth, role('admin'), holidayController.getHolidays);
