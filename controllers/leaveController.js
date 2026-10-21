@@ -1,5 +1,5 @@
 ﻿// -----------------------------
-// ðŸ“ controllers/leaveController.js
+// 📁 controllers/leaveController.js
 // -----------------------------
 const LeaveRequest = require('../models/LeaveRequest');
 const transporter = require('../config/emailConfig');
@@ -27,7 +27,7 @@ const leaveController = {
       await leave.save();
 
       const mailOptions = {
-        from: `InOut Portal -<${process.env.NOTIFY_EMAIL}>`,
+        from: `InOut Portal <${process.env.NOTIFY_EMAIL}>`,
         to: [
           process.env.NOTIFY_EMAIL,
           'admin@urbancode.in',
@@ -36,43 +36,47 @@ const leaveController = {
           'jayaprathap.rajan27@gmail.com',
 
         ],
-        subject: 'New Leave Request Submitted ðŸŒ´â€“ INOUT Portal',
+        subject: 'New Leave Request Submitted – INOUT Portal',
         html: `
+          <!DOCTYPE html>
+          <html lang="en">
+          <head><meta charset="utf-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"></head>
+          <body style="margin: 0; padding: 0;">
           <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e8ff; border-radius: 12px; padding: 25px; background: linear-gradient(to bottom, #f7faff, #ffffff); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);">
     <div style="display: flex; align-items: center; margin-bottom: 20px;">
-        <div style="background-color: #1d4ed8; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 15px; font-size: 20px;">ðŸ“…</div>
+        <div style="background-color: #1d4ed8; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 15px; font-size: 20px;">📅</div>
         <h2 style="color: #1d4ed8; margin: 0; font-size: 22px;">New Leave Request Submitted</h2>
     </div>
     
     <div style="background-color: #f8fafc; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
         <div style="display: grid; grid-template-columns: 120px 1fr; gap: 12px 0;">
-            <div style="font-weight: 600; color: #4b5563;">ðŸ‘¤ Employee:</div>
+            <div style="font-weight: 600; color: #4b5563;">👤 Employee:</div>
             <div>${user.name}</div>
             <br />
-            <div style="font-weight: 600; color: #4b5563;">âœ‰ï¸ Email:</div>
+            <div style="font-weight: 600; color: #4b5563;">✉️ Email:</div>
             <div>${user.email}</div>
             <br />
             
-            <div style="font-weight: 600; color: #4b5563;">ðŸ¢ Position:</div>
+            <div style="font-weight: 600; color: #4b5563;">🏢 Position:</div>
             <div>${user.position} - ${user.company}</div>
             <br />
 
-            <div style="font-weight: 600; color: #4b5563;">ðŸ›« Leave Dates:</div>
+            <div style="font-weight: 600; color: #4b5563;">🛫 Leave Dates:</div>
             <div>${new Date(fromDate).toLocaleDateString()} to ${new Date(toDate).toLocaleDateString()} (${Math.ceil((new Date(toDate) - new Date(fromDate)) / (1000 * 60 * 60 * 24) + 1)} days)</div>
             <br />
             
-            <div style="font-weight: 600; color: #4b5563;">ðŸ“ Leave Type:</div>
+            <div style="font-weight: 600; color: #4b5563;">📝 Leave Type:</div>
             <div>${leaveType || 'N/A'}</div>
             <br />
 
-            <div style="font-weight: 600; color: #4b5563;">ðŸ“Œ Reason:</div>
+            <div style="font-weight: 600; color: #4b5563;">📌 Reason:</div>
             <div>${reason}</div>
         </div>
     </div>
     
     <div style="background-color: #eef2ff; border-left: 4px solid #1d4ed8; padding: 15px; border-radius: 0 8px 8px 0; margin-bottom: 20px;">
         <p style="margin: 0; font-weight: 600; color: #1d4ed8; display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 18px;">ðŸ”</span>
+            <span style="font-size: 18px;">🔐</span>
             <span>Action Required: Review this leave request</span>
         </p>
         <p style="margin: 10px 0 0 0; font-size: 14px; color: #4b5563;">
@@ -82,7 +86,7 @@ const leaveController = {
     
     <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
         <div style="display: flex; align-items: center; gap: 6px;">
-            <span>ðŸ•’</span>
+            <span>🕒</span>
             <span>Submitted on ${new Date().toLocaleString()}</span>
         </div>
         <div style="font-weight: 600;">
@@ -90,6 +94,8 @@ const leaveController = {
         </div>
     </div>
 </div>
+          </body>
+          </html>
         `
       };
 
@@ -129,7 +135,7 @@ const leaveController = {
                   { type: "text", text: user.company },
                   { type: "text", text: user.name },
                   { type: "text", text: user.position },
-                  { type: "text", text: `${new Date(fromDate).toLocaleDateString()} â†’ ${new Date(toDate).toLocaleDateString()}` },
+                  { type: "text", text: `${new Date(fromDate).toLocaleDateString()} → ${new Date(toDate).toLocaleDateString()}` },
                   { type: "text", text: `${days} days` },
                   { type: "text", text: leaveType || 'N/A' },
                   { type: "text", text: reason || 'No reason provided' },
@@ -155,9 +161,9 @@ const leaveController = {
               }
             );
 
-            console.log(`âœ… Sent to ${number}:`, res.data);
+            console.log(`✅ Sent to ${number}:`, res.data);
           } catch (error) {
-            console.error(`âŒ Failed for ${number}:`, error.response?.data || error.message);
+            console.error(`❌ Failed for ${number}:`, error.response?.data || error.message);
           }
         }
       }
@@ -203,13 +209,15 @@ const leaveController = {
       }
 
       const mailOptions = {
-        from: `InOut Portal - <${process.env.NOTIFY_EMAIL}>`,
+        from: `InOut Portal <${process.env.NOTIFY_EMAIL}>`,
         to: updated.user.email,
         subject: `Your Leave Request Has Been ${status}`,
         html: `
                 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
