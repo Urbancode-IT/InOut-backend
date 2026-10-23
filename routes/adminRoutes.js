@@ -17,6 +17,7 @@ router.get('/letters/download', auth, role('admin'), adminController.downloadLet
 router.post('/users/:id/unlock-attendance', auth, role('admin'), adminController.unlockAttendance);
 router.put('/users/:id/unlock-attendance', auth, role('admin'), adminController.unlockAttendance);
 router.post('/monthly-reports/send', auth, role('admin'), adminController.triggerMonthlyReports);
+router.post('/payslips/auto-send', auth, role('admin'), adminController.triggerAutoPayslipMails);
 
 router.post('/send-document-email', auth, role('admin'), adminController.sendDocumentEmail);
 

@@ -134,12 +134,20 @@ async function startServer() {
       console.error('Missed attendance lock scheduler failed to start:', schedErr.message);
     }
 
-    // Monthly attendance + payslip emails (1st of month 10:00 Asia/Kolkata)
+    // Monthly attendance digest (1st of month 10:00 Asia/Kolkata) — no payslip
     try {
       const { startMonthlyReportScheduler } = require('./jobs/monthlyReportScheduler');
       startMonthlyReportScheduler();
     } catch (schedErr) {
       console.error('Monthly report scheduler failed to start:', schedErr.message);
+    }
+
+    // Auto payslip-only emails (4th of month 10:00 Asia/Kolkata) — active employees
+    try {
+      const { startPayslipAutoMailScheduler } = require('./jobs/payslipAutoMailScheduler');
+      startPayslipAutoMailScheduler();
+    } catch (schedErr) {
+      console.error('Payslip auto-mail scheduler failed to start:', schedErr.message);
     }
 
     // Birthday wishes to chat webhook (09:00 Asia/Kolkata)

@@ -428,6 +428,43 @@ const adminController = {
       res.status(500).json({ error: err.message || 'Internal server error' });
     }
   },
+
+  /**
+   * Manually trigger previous-month payslip-only emails (active employees).
+   * Query: dryRun=true | force=true | userId=<id> | toEmail=<override>
+   */
+  triggerAutoPayslipMails: async (req, res) => {
+    try {
+      const { runAutoPayslipMails, sendTestPayslipMail } = require('../services/payslipAutoMailService');
+      const dryRun =
+        String(req.query.dryRun || req.body?.dryRun || '').toLowerCase() === 'true';
+      const force =
+        String(req.query.force || req.body?.force || '').toLowerCase() === 'true';
+      const userId = req.query.userId || req.body?.userId || null;
+      const toEmail = req.query.toEmail || req.body?.toEmail || null;
+      const testOnly =
+        String(req.query.testOnly || req.body?.testOnly || '').toLowerCase() === 'true';
+
+      if (testOnly && toEmail) {
+        const result = await sendTestPayslipMail({ toEmail });
+        return res.json({ message: 'Test payslip email sent', ...result });
+      }
+
+      const report = await runAutoPayslipMails({
+        dryRun,
+        force,
+        userId,
+        toEmailOverride: toEmail || null,
+      });
+      res.json({
+        message: dryRun ? 'Auto payslip dry-run completed' : 'Auto payslip run completed',
+        ...report,
+      });
+    } catch (err) {
+      console.error('Error triggering auto payslip mails:', err);
+      res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  },
 };
 
 module.exports = adminController;
