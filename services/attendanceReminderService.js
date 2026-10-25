@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Attendance = require('../models/Attendance');
+const Holiday = require('../models/Holiday');
 const AttendanceReminderLog = require('../models/AttendanceReminderLog');
 const transporter = require('../config/emailConfig');
 const {
@@ -37,6 +38,65 @@ const getTodayBoundsUtc = (now = new Date()) => {
   const start = new Date(`${dateKey}T00:00:00+05:30`);
   const end = new Date(`${dateKey}T23:59:59.999+05:30`);
   return { start, end, dateKey };
+};
+
+const getIstWeekday = (date = new Date()) =>
+  new Intl.DateTimeFormat('en-US', {
+    timeZone: TIMEZONE,
+    weekday: 'long',
+  }).format(date);
+
+/**
+ * Check-in / check-out reminders must not go out on non-working days:
+ * Sunday (weekly off — Saturday is a normal working day) or a company
+ * holiday from the Holiday collection. Holiday dates are matched by IST
+ * date key, same as missedAttendanceLockService, so how the date was
+ * stored (UTC / IST midnight) does not matter.
+ */
+const resolveNonWorkingDay = ({ dateKey, weekday, holidays = [] } = {}) => {
+  if (weekday === 'Sunday') {
+    return {
+      dateKey,
+      weekday,
+      isNonWorkingDay: true,
+      skippedReason: 'sunday',
+      holidayName: null,
+    };
+  }
+
+  const holiday = (holidays || []).find(
+    (entry) => entry?.date && getIstDateKey(new Date(entry.date)) === dateKey
+  );
+  if (holiday) {
+    return {
+      dateKey,
+      weekday,
+      isNonWorkingDay: true,
+      skippedReason: 'holiday',
+      holidayName: holiday.name || null,
+    };
+  }
+
+  return {
+    dateKey,
+    weekday,
+    isNonWorkingDay: false,
+    skippedReason: null,
+    holidayName: null,
+  };
+};
+
+const getNonWorkingDayInfo = async (now = new Date()) => {
+  const dateKey = getIstDateKey(now);
+  const weekday = getIstWeekday(now);
+
+  // Sunday needs no DB lookup.
+  if (weekday === 'Sunday') {
+    return resolveNonWorkingDay({ dateKey, weekday });
+  }
+
+  const holidays = await Holiday.find({}).select('date name').lean();
+  return resolveNonWorkingDay({ dateKey, weekday, holidays });
 };
 
 const isDirectorUser = (user) => {
@@ -324,6 +384,20 @@ const sendOneReminder = async ({
  * All active staff with email, no check-in today.
  */
 const runCheckInReminder = async ({ now = new Date(), dryRun = false } = {}) => {
+  const nonWorkingDay = await getNonWorkingDayInfo(now);
+  if (nonWorkingDay.isNonWorkingDay) {
+    return {
+      reminderType: REMINDER_TYPES.CHECKIN_10AM,
+      dateKey: nonWorkingDay.dateKey,
+      candidateCount: 0,
+      results: [],
+      skipped: true,
+      skippedReason: nonWorkingDay.skippedReason,
+      holidayName: nonWorkingDay.holidayName,
+      weekday: nonWorkingDay.weekday,
+    };
+  }
+
   const employees = await getAttendanceReminderRecipients();
   const { checkedIn, dateKey } = await getTodayAttendanceSets(now);
   const recipients = employees.filter((u) => !checkedIn.has(String(u._id)));
@@ -356,6 +430,20 @@ const runCheckoutReminder = async (
   reminderType,
   { now = new Date(), dryRun = false, finalReminder = false } = {}
 ) => {
+  const nonWorkingDay = await getNonWorkingDayInfo(now);
+  if (nonWorkingDay.isNonWorkingDay) {
+    return {
+      reminderType,
+      dateKey: nonWorkingDay.dateKey,
+      candidateCount: 0,
+      results: [],
+      skipped: true,
+      skippedReason: nonWorkingDay.skippedReason,
+      holidayName: nonWorkingDay.holidayName,
+      weekday: nonWorkingDay.weekday,
+    };
+  }
+
   const employees = await getAttendanceReminderRecipients();
   const { checkedIn, checkedOut, dateKey } = await getTodayAttendanceSets(now);
 
@@ -454,6 +542,9 @@ module.exports = {
   REMINDER_TYPES,
   URLS,
   getIstDateKey,
+  getIstWeekday,
+  resolveNonWorkingDay,
+  getNonWorkingDayInfo,
   getTodayBoundsUtc,
   isDirectorUser,
   getEligibleEmployees,

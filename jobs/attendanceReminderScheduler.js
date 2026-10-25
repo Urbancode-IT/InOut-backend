@@ -9,6 +9,16 @@ const {
 let started = false;
 
 const summarize = (label, report) => {
+  if (report?.skipped) {
+    const detail =
+      report.skippedReason === 'holiday' && report.holidayName
+        ? `holiday (${report.holidayName})`
+        : report.skippedReason;
+    console.log(
+      `[AttendanceReminder] ${label} skipped date=${report.dateKey} reason=${detail}`
+    );
+    return;
+  }
   const sent = (report.results || []).filter((r) => r.status === 'sent').length;
   const skipped = (report.results || []).filter((r) => r.status === 'skipped_duplicate').length;
   const failed = (report.results || []).filter((r) => r.status === 'failed').length;
@@ -50,9 +60,12 @@ const startAttendanceReminderScheduler = () => {
     return { started: true };
   }
 
+  // Mon–Sat only (1-6): no reminders on Sunday.
+  // Company holidays are also skipped inside attendanceReminderService.
+
   // 10:00 AM IST — Check-In reminder
   cron.schedule(
-    '0 10 * * *',
+    '0 10 * * 1-6',
     () => {
       safeRun('checkin-10am', () => runCheckInReminder());
     },
@@ -62,7 +75,7 @@ const startAttendanceReminderScheduler = () => {
 
   // 6:00 PM IST — Check-Out reminder
   cron.schedule(
-    '0 18 * * *',
+    '0 18 * * 1-6',
     () => {
       safeRun('checkout-6pm', () => runCheckout6pmReminder());
     },
@@ -71,7 +84,7 @@ const startAttendanceReminderScheduler = () => {
 
   // 8:00 PM IST — Final Check-Out reminder
   cron.schedule(
-    '0 20 * * *',
+    '0 20 * * 1-6',
     () => {
       safeRun('checkout-8pm', () => runCheckout8pmReminder());
     },
@@ -80,7 +93,7 @@ const startAttendanceReminderScheduler = () => {
 
   started = true;
   console.log(
-    '[AttendanceReminder] Scheduler started (Asia/Kolkata: 10:00, 18:00, 20:00)'
+    '[AttendanceReminder] Scheduler started (Asia/Kolkata Mon-Sat: 10:00, 18:00, 20:00; skipped on Sundays & holidays)'
   );
   return { started: true };
 };

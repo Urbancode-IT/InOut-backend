@@ -189,10 +189,63 @@ function runUnit() {
     fail('unit: skip reminder for listed users only', e);
   }
 
+  // No check-in / check-out reminders on Sundays or company holidays
+  try {
+    const {
+      getIstWeekday,
+      resolveNonWorkingDay,
+    } = require('../services/attendanceReminderService');
+
+    // 2026-10-25 is a Sunday, 2026-10-26 is a Monday (IST noon)
+    const sunday = new Date('2026-10-25T12:00:00+05:30');
+    assert.strictEqual(getIstWeekday(sunday), 'Sunday');
+    assert.deepStrictEqual(
+      resolveNonWorkingDay({ dateKey: '2026-10-25', weekday: 'Sunday', holidays: [] }),
+      {
+        dateKey: '2026-10-25',
+        weekday: 'Sunday',
+        isNonWorkingDay: true,
+        skippedReason: 'sunday',
+        holidayName: null,
+      }
+    );
+
+    // Saturday is a normal working day
+    assert.strictEqual(
+      resolveNonWorkingDay({ dateKey: '2026-10-24', weekday: 'Saturday', holidays: [] })
+        .isNonWorkingDay,
+      false
+    );
+
+    const holiday = resolveNonWorkingDay({
+      dateKey: '2026-10-26',
+      weekday: 'Monday',
+      holidays: [{ date: new Date('2026-10-26T00:00:00.000Z'), name: 'Diwali' }],
+    });
+    assert.strictEqual(holiday.isNonWorkingDay, true);
+    assert.strictEqual(holiday.skippedReason, 'holiday');
+    assert.strictEqual(holiday.holidayName, 'Diwali');
+
+    assert.strictEqual(
+      resolveNonWorkingDay({
+        dateKey: '2026-10-27',
+        weekday: 'Tuesday',
+        holidays: [{ date: new Date('2026-10-26T00:00:00.000Z'), name: 'Diwali' }],
+      }).isNonWorkingDay,
+      false
+    );
+    pass('unit: reminders skipped on Sunday & holidays, not on Saturday/working days');
+  } catch (e) {
+    fail('unit: reminders skipped on Sunday & holidays, not on Saturday/working days', e);
+  }
+
   // Duplicate protection contract
   try {
     const cron = require('node-cron');
     assert.strictEqual(typeof cron.schedule, 'function');
+    assert.ok(cron.validate('0 10 * * 1-6'));
+    assert.ok(cron.validate('0 18 * * 1-6'));
+    assert.ok(cron.validate('0 20 * * 1-6'));
     assert.ok(cron.validate('0 10 * * *'));
     assert.ok(cron.validate('0 12 * * *'));
     assert.ok(cron.validate('0 15 * * *'));
