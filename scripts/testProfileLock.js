@@ -1,5 +1,5 @@
 /**
- * Profile completion + 3-day attendance lock tests.
+ * Profile completion + 1-day attendance lock tests.
  * Run: node scripts/testProfileLock.js
  *
  * Uses in-memory mocks for gate/controller logic.
@@ -58,6 +58,7 @@ const completeProfileFields = {
     bankAccountNumber: '998877',
     ifscCode: 'HDFC0001',
   },
+  aadharCard: { url: 'https://example.com/aadhaar.pdf', filename: 'aadhaar.pdf' },
   dateOfJoining: new Date('2024-01-15'),
   skills: ['JavaScript'],
   rolesAndResponsibility: ['Development'],
@@ -73,10 +74,23 @@ async function runUnitAndMocked() {
     assert.ok(getMissingProfileFields(incomplete).includes('bankDetails.ifscCode'));
     assert.ok(getMissingProfileFields(incomplete).includes('dateOfBirth'));
     assert.ok(getMissingProfileFields(incomplete).includes('bloodGroup'));
+    assert.ok(getMissingProfileFields(incomplete).includes('aadharCard'));
     assert.ok(!getMissingProfileFields(incomplete).includes('skills'));
     pass('unit: detects incomplete profile fields');
   } catch (e) {
     fail('unit: detects incomplete profile fields', e);
+  }
+
+  try {
+    const missingAadhar = makeUser({
+      ...completeProfileFields,
+      aadharCard: { url: '', filename: '' },
+    });
+    assert.strictEqual(isProfileComplete(missingAadhar), false);
+    assert.deepStrictEqual(getMissingProfileFields(missingAadhar), ['aadharCard']);
+    pass('unit: missing Aadhaar card = incomplete');
+  } catch (e) {
+    fail('unit: missing Aadhaar card = incomplete', e);
   }
 
   try {
@@ -132,13 +146,13 @@ async function runUnitAndMocked() {
   }
 
   try {
-    const start = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    const start = new Date(Date.now() - 12 * 60 * 60 * 1000);
     assert.strictEqual(hasIncompleteGraceExpired(start), false);
-    const expired = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+    const expired = new Date(Date.now() - 25 * 60 * 60 * 1000);
     assert.strictEqual(hasIncompleteGraceExpired(expired), true);
-    pass('unit: 3-day grace expiry math');
+    pass('unit: 1-day grace expiry math');
   } catch (e) {
-    fail('unit: 3-day grace expiry math', e);
+    fail('unit: 1-day grace expiry math', e);
   }
 
   // Incomplete → warning path: tracking starts, check-in still allowed (not locked)
@@ -155,11 +169,11 @@ async function runUnitAndMocked() {
     fail('mock: incomplete profile warning + check-in allowed (tracking started)', e);
   }
 
-  // Grace not reset on later incomplete check-in
+  // Grace not reset on later incomplete check-in (still within 1 day)
   try {
     const started = new Date('2026-01-01T00:00:00.000Z');
     const user = makeUser({ profileIncompleteSince: started });
-    const gate = await applyProfileGateOnCheckIn(user, new Date('2026-01-02T00:00:00.000Z'));
+    const gate = await applyProfileGateOnCheckIn(user, new Date('2026-01-01T12:00:00.000Z'));
     assert.strictEqual(gate.locked, false);
     assert.strictEqual(user.profileIncompleteSince.toISOString(), started.toISOString());
     pass('mock: grace period not reset on later check-in');
@@ -167,19 +181,19 @@ async function runUnitAndMocked() {
     fail('mock: grace period not reset on later check-in', e);
   }
 
-  // Complete within 3 days → clear tracking
+  // Complete within 1 day → clear tracking
   try {
     const user = makeUser({
       ...completeProfileFields,
-      profileIncompleteSince: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      profileIncompleteSince: new Date(Date.now() - 12 * 60 * 60 * 1000),
     });
     const gate = await applyProfileGateOnCheckIn(user);
     assert.strictEqual(gate.profileIncomplete, false);
     assert.strictEqual(gate.locked, false);
     assert.strictEqual(user.profileIncompleteSince, null);
-    pass('mock: completing profile before 3 days clears tracking');
+    pass('mock: completing profile before 1 day clears tracking');
   } catch (e) {
-    fail('mock: completing profile before 3 days clears tracking', e);
+    fail('mock: completing profile before 1 day clears tracking', e);
   }
 
   // Also via clearIncompleteTrackingIfComplete (profile update path)
@@ -195,19 +209,19 @@ async function runUnitAndMocked() {
     fail('mock: profile update clears incomplete tracking when complete', e);
   }
 
-  // 3 days passed → auto lock
+  // 1 day passed → auto lock
   try {
     const user = makeUser({
-      profileIncompleteSince: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+      profileIncompleteSince: new Date(Date.now() - 25 * 60 * 60 * 1000),
     });
     const gate = await applyProfileGateOnCheckIn(user);
     assert.strictEqual(gate.locked, true);
     assert.strictEqual(gate.justLocked, true);
     assert.strictEqual(user.attendanceLocked, true);
     assert.ok(user.attendanceLockedAt);
-    pass('mock: 3 days passed → automatic lock');
+    pass('mock: 1 day passed → automatic lock');
   } catch (e) {
-    fail('mock: 3 days passed → automatic lock', e);
+    fail('mock: 1 day passed → automatic lock', e);
   }
 
   // Locked user stays locked (bypass not possible via client state)

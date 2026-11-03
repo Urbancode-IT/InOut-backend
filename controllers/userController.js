@@ -455,10 +455,12 @@ const userController = {
 
       if (!updated) return res.status(404).json({ message: 'User not found' });
 
+      await clearIncompleteTrackingIfComplete(updated);
+
       res.json({
         message: 'Aadhar card uploaded successfully',
         aadharCard: updated.aadharCard,
-        user: maskSensitiveUserFields(updated, req.user),
+        user: maskSensitiveUserFields(withProfileCompletion(updated), req.user),
       });
     } catch (error) {
       console.error('Error uploading Aadhar card:', error);

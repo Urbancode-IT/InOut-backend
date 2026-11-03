@@ -152,7 +152,7 @@ exports.markAttendance = async (req, res) => {
     }
 
     const profileSelect =
-      'branch address bankDetails bloodGroup dateOfBirth dateOfJoining dateOfRelieving role position department works isActive skills rolesAndResponsibility company profileIncompleteSince attendanceLocked attendanceLockedAt inoutBlocked inoutBlockedAt inoutBlockedForDate inoutLockWaivedForDate employeeId email';
+      'branch address bankDetails bloodGroup dateOfBirth dateOfJoining dateOfRelieving role position department works isActive skills rolesAndResponsibility company aadharCard profileIncompleteSince attendanceLocked attendanceLockedAt inoutBlocked inoutBlockedAt inoutBlockedForDate inoutLockWaivedForDate employeeId email';
     const user = await User.findById(req.user._id).select(profileSelect);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -163,7 +163,7 @@ exports.markAttendance = async (req, res) => {
         error: 'Attendance not required',
         code: 'ATTENDANCE_NOT_REQUIRED',
         message:
-          'Check-in and check-out are not required for Management or Freelancer accounts.',
+          'Check-in and check-out are not required for Director/Founder, Management (except Placement Lead), or Freelancer accounts.',
       });
     }
 
@@ -185,7 +185,7 @@ exports.markAttendance = async (req, res) => {
       justLocked: false,
     };
 
-    // Profile gate + 3-day lock apply to check-in only (backend is source of truth).
+    // Profile gate + 1-day lock apply to check-in only (backend is source of truth).
     // Always evaluate completeness first so a later-completed profile auto-unlocks.
     if (attendanceType === 'check-in') {
       profileGate = await applyProfileGateOnCheckIn(user);

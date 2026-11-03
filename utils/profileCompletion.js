@@ -1,4 +1,6 @@
-const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+/** @deprecated use ONE_DAY_MS — kept for older imports */
+const THREE_DAYS_MS = ONE_DAY_MS;
 
 const isFilled = (value) => {
   if (value == null) return false;
@@ -47,6 +49,15 @@ const REQUIRED_PROFILE_CHECKS = [
     key: 'bankDetails.ifscCode',
     get: (u) => firstFilled(u.bankDetails?.ifscCode, u.bankDetails?.ifsc),
   },
+  {
+    key: 'aadharCard',
+    get: (u) =>
+      firstFilled(
+        typeof u.aadharCard === 'string' ? u.aadharCard : null,
+        u.aadharCard?.url,
+        u.aadharCard?.secure_url
+      ),
+  },
 ];
 
 const getProfileIncompleteGraceMs = () => {
@@ -54,7 +65,7 @@ const getProfileIncompleteGraceMs = () => {
   if (raw != null && raw !== '' && Number.isFinite(Number(raw))) {
     return Number(raw);
   }
-  return THREE_DAYS_MS;
+  return ONE_DAY_MS;
 };
 
 const getMissingProfileFields = (user) =>
@@ -161,6 +172,7 @@ const applyProfileGateOnCheckIn = async (user, now = new Date()) => {
 const clearIncompleteTrackingIfComplete = async (user) => unlockIfProfileComplete(user);
 
 module.exports = {
+  ONE_DAY_MS,
   THREE_DAYS_MS,
   REQUIRED_PROFILE_CHECKS,
   getMissingProfileFields,
