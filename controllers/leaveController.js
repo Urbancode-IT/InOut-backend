@@ -6,6 +6,49 @@ const transporter = require('../config/emailConfig');
 const User = require('../models/User');
 const axios = require('axios');
 
+/** Company policy: 1 Sick + 1 Casual + 1 Emergency leave day per employee per calendar month. */
+const MONTHLY_LEAVE_LIMITS = { Casual: 1, Sick: 1, Emergency: 1 };
+
+/** Parse leave dates in local calendar (avoids UTC shift on YYYY-MM-DD). */
+function startOfLocalDay(date) {
+  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date)) {
+    const [y, m, d] = date.slice(0, 10).split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  const d = new Date(date);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/** Count calendar days of a leave that fall in a given year/month (0-indexed month). */
+function countDaysInMonth(fromDate, toDate, year, month) {
+  const start = startOfLocalDay(fromDate);
+  const end = startOfLocalDay(toDate);
+  if (end < start) return 0;
+
+  let count = 0;
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    if (cursor.getFullYear() === year && cursor.getMonth() === month) {
+      count += 1;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return count;
+}
+
+/** Months touched by a date range → [{ year, month }, ...] */
+function monthsTouched(fromDate, toDate) {
+  const start = startOfLocalDay(fromDate);
+  const end = startOfLocalDay(toDate);
+  const months = [];
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  const last = new Date(end.getFullYear(), end.getMonth(), 1);
+  while (cursor <= last) {
+    months.push({ year: cursor.getFullYear(), month: cursor.getMonth() });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return months;
+}
 
 const leaveController = {
   applyLeave: async (req, res) => {
@@ -14,8 +57,39 @@ const leaveController = {
       if (!fromDate || !toDate || !reason) {
         return res.status(400).json({ error: 'Missing fields' });
       }
+      if (startOfLocalDay(fromDate) > startOfLocalDay(toDate)) {
+        return res.status(400).json({ error: 'From Date should not be after To Date' });
+      }
       const user = await User.findById(req.user._id);
       if (!user) return res.status(404).json({ error: 'User not found' });
+
+      // Enforce monthly quota for Casual / Sick / Emergency.
+      if (MONTHLY_LEAVE_LIMITS[leaveType] != null) {
+        const existing = await LeaveRequest.find({
+          user: user._id,
+          leaveType,
+          status: { $in: ['Pending', 'Approved'] },
+        });
+
+        for (const { year, month } of monthsTouched(fromDate, toDate)) {
+          const used = existing.reduce(
+            (sum, leave) => sum + countDaysInMonth(leave.fromDate, leave.toDate, year, month),
+            0
+          );
+          const requesting = countDaysInMonth(fromDate, toDate, year, month);
+          const limit = MONTHLY_LEAVE_LIMITS[leaveType];
+          if (used + requesting > limit) {
+            const monthLabel = new Date(year, month, 1).toLocaleString('en-IN', {
+              month: 'long',
+              year: 'numeric',
+            });
+            return res.status(400).json({
+              error: `Monthly ${leaveType} leave limit reached for ${monthLabel}. Only ${limit} ${leaveType} leave day(s) allowed per month (already used: ${used}).`,
+            });
+          }
+        }
+      }
+
       const leave = new LeaveRequest({
         user: user._id,
         fromDate,
