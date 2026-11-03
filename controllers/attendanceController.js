@@ -23,6 +23,7 @@ const {
   ensureUserMissedDayLock,
 } = require('../services/missedAttendanceLockService');
 const { saveAttendanceImageInBackground, uploadAttendanceImageNow } = require('../middleware/upload');
+const { skipsCheckInOut } = require('../utils/skipAttendance');
 
 const resolveAttendanceUserIds = async (userId) => {
   const user = await User.findById(userId).select('email employeeId phone name');
@@ -151,10 +152,19 @@ exports.markAttendance = async (req, res) => {
     }
 
     const profileSelect =
-      'branch address bankDetails bloodGroup dateOfBirth dateOfJoining dateOfRelieving role position works isActive skills rolesAndResponsibility company profileIncompleteSince attendanceLocked attendanceLockedAt inoutBlocked inoutBlockedAt inoutBlockedForDate inoutLockWaivedForDate employeeId email';
+      'branch address bankDetails bloodGroup dateOfBirth dateOfJoining dateOfRelieving role position department works isActive skills rolesAndResponsibility company profileIncompleteSince attendanceLocked attendanceLockedAt inoutBlocked inoutBlockedAt inoutBlockedForDate inoutLockWaivedForDate employeeId email';
     const user = await User.findById(req.user._id).select(profileSelect);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (skipsCheckInOut(user)) {
+      return res.status(403).json({
+        error: 'Attendance not required',
+        code: 'ATTENDANCE_NOT_REQUIRED',
+        message:
+          'Check-in and check-out are not required for Management or Freelancer accounts.',
+      });
     }
 
     await ensureUserMissedDayLock(user);

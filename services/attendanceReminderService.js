@@ -14,6 +14,10 @@ const {
   buildItStatusCallReminderHtml,
   buildConsultancyCallReminderHtml,
 } = require('../utils/attendanceReminderEmails');
+const {
+  skipsCheckInOut,
+  skipsAttendanceReports,
+} = require('../utils/skipAttendance');
 
 const TIMEZONE = 'Asia/Kolkata';
 
@@ -113,7 +117,8 @@ const hasUsableEmail = (user) =>
   typeof user?.email === 'string' && user.email.trim().length > 0;
 
 /**
- * Active employees eligible for monthly reports (excludes Directors, admins, inactive).
+ * Active employees eligible for monthly reports
+ * (excludes Directors / Founders / Management / Freelancer, admins, inactive).
  */
 const getEligibleEmployees = async () => {
   const users = await User.find({
@@ -121,10 +126,12 @@ const getEligibleEmployees = async () => {
     isActive: { $ne: false },
     email: { $exists: true, $nin: [null, ''] },
   })
-    .select('_id name email position works role isActive employeeId')
+    .select('_id name email position department works role isActive employeeId')
     .lean();
 
-  return users.filter((user) => hasUsableEmail(user) && !isDirectorUser(user));
+  return users.filter(
+    (user) => hasUsableEmail(user) && !skipsAttendanceReports(user)
+  );
 };
 
 const isSystemAdminUser = (user) =>
@@ -141,7 +148,9 @@ const getAttendanceReminderRecipients = async () => {
     role: { $ne: 'admin' },
     email: { $exists: true, $nin: [null, ''] },
   })
-    .select('_id name email position works role isActive employeeId skipAttendanceReminders')
+    .select(
+      '_id name email position department works role isActive employeeId skipAttendanceReminders'
+    )
     .lean();
 
   return users.filter(
@@ -158,6 +167,7 @@ const parseSkipEmails = () =>
 const shouldSkipAttendanceReminder = (user) => {
   if (!user) return true;
   if (user.skipAttendanceReminders === true) return true;
+  if (skipsCheckInOut(user)) return true;
   const email = String(user.email || '').trim().toLowerCase();
   return Boolean(email && parseSkipEmails().includes(email));
 };

@@ -8,6 +8,7 @@ const {
   buildUserAliasMap,
   resolveAttendanceUserId,
 } = require('./attendanceReminderService');
+const { skipsCheckInOut } = require('../utils/skipAttendance');
 const {
   INOUT_BLOCKED_MESSAGE,
   getIstDateKey,
@@ -18,6 +19,9 @@ const {
   leaveCoversDateKey,
   shouldLockMissedDay,
 } = require('../utils/missedAttendanceLock');
+
+const skipsMissedDayLock = (user) =>
+  isDirectorUser(user) || skipsCheckInOut(user);
 
 const holidayDateKeys = (holidays) => {
   const keys = new Set();
@@ -39,10 +43,10 @@ const eligibleEmployees = async () => {
     isActive: { $ne: false },
     name: { $ne: 'Admin' },
   }).select(
-    '_id name email employeeId role position works isActive dateOfJoining dateOfRelieving inoutBlocked inoutBlockedAt inoutBlockedForDate inoutLockWaivedForDate'
+    '_id name email employeeId role position department works isActive dateOfJoining dateOfRelieving inoutBlocked inoutBlockedAt inoutBlockedForDate inoutLockWaivedForDate'
   );
 
-  return users.filter((user) => !isDirectorUser(user));
+  return users.filter((user) => !skipsMissedDayLock(user));
 };
 
 const attendanceSetsForDate = async (dateKey, users) => {
@@ -213,7 +217,7 @@ const runMissedAttendanceLock = async ({ now = new Date(), dryRun = false } = {}
  */
 const releaseLockIfCheckedInToday = async (user, now = new Date()) => {
   if (!user?.inoutBlocked) return user;
-  if (String(user.role || '') === 'admin' || isDirectorUser(user)) return user;
+  if (String(user.role || '') === 'admin' || skipsMissedDayLock(user)) return user;
   const todayKey = getIstDateKey(now);
   const todayAttendance = await attendanceSetsForDate(todayKey, [user]);
   if (!todayAttendance.checkedIn.has(String(user._id))) return user;
@@ -227,7 +231,7 @@ const releaseLockIfCheckedInToday = async (user, now = new Date()) => {
 const ensureUserMissedDayLock = async (user, now = new Date()) => {
   if (!user) return user;
   if (String(user.role || '') !== 'employee') return user;
-  if (isDirectorUser(user)) return user;
+  if (skipsMissedDayLock(user)) return user;
   if (process.env.MISSED_ATTENDANCE_LOCK_ENABLED === 'false') return user;
 
   const todayKey = getIstDateKey(now);
