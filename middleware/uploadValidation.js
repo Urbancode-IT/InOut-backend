@@ -17,7 +17,8 @@ const PRESETS = {
     maxLabel: '5MB',
   },
   aadharCard: {
-    allowedMimes: ['image/jpeg', 'image/png', 'application/pdf'],
+    // image/jpg is non-standard but some phones/browsers still send it
+    allowedMimes: ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'],
     maxBytes: 5 * MB,
     typeLabel: 'JPG, PNG or PDF',
     maxLabel: '5MB',

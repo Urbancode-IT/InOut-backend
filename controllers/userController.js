@@ -382,14 +382,48 @@ const userController = {
       const file = req.file;
       if (!file) return res.status(400).json({ message: 'No file uploaded' });
 
+      const fs = require('fs');
+      const path = require('path');
+      const PUBLIC_API = (process.env.PUBLIC_API_URL || 'https://api.inout.urbancode.tech').replace(/\/$/, '');
+
+      const saveLocalAadhar = (buffer, originalName) => {
+        const uploadsDir = path.join(__dirname, '../uploads/aadhar_cards');
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+        const ext = path.extname(originalName || '') || (
+          (file.mimetype === 'application/pdf') ? '.pdf' : '.png'
+        );
+        const fileName = `aadhar-${userId}-${Date.now()}${ext}`;
+        fs.writeFileSync(path.join(uploadsDir, fileName), buffer);
+        return `${PUBLIC_API}/uploads/aadhar_cards/${fileName}`;
+      };
+
+      const withTimeout = (promise, ms, label) =>
+        Promise.race([
+          promise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(label || 'upload timed out')), ms)
+          ),
+        ]);
+
       let fileUrl = '';
       if (file.buffer) {
+        // Local-first: Cloudinary PDF→image conversion often hangs past proxy timeouts
+        // and never reaches the old fallback, which showed as a generic client failure.
+        try {
+          fileUrl = saveLocalAadhar(file.buffer, file.originalname);
+          console.log('Saved Aadhaar card locally:', fileUrl);
+        } catch (localErr) {
+          console.error('Local Aadhaar save failed:', localErr?.message || localErr);
+        }
+
         try {
           const cloudinary = require('../config/cloudinary');
           const streamUpload = (buffer, options) => new Promise((resolve, reject) => {
             const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
               if (result) resolve(result);
-              else reject(error);
+              else reject(error || new Error('Cloudinary upload returned no result'));
             });
             const { Readable } = require('stream');
             const readable = new Readable();
@@ -399,41 +433,28 @@ const userController = {
             readable.pipe(stream);
           });
 
-          const isPdf = file.mimetype === 'application/pdf' || (file.originalname || '').toLowerCase().endsWith('.pdf');
+          const isPdf =
+            file.mimetype === 'application/pdf' ||
+            (file.originalname || '').toLowerCase().endsWith('.pdf');
           const baseName = (file.originalname || 'aadhar').replace(/[^a-zA-Z0-9_-]/g, '_');
+          // PDFs as raw avoid slow page-rasterize hangs; images stay as image.
           const opts = {
             folder: `aadhar_cards/${userId}`,
-            resource_type: 'image',
-            ...(isPdf ? { format: 'png' } : {}),
+            resource_type: isPdf ? 'raw' : 'image',
             public_id: `${baseName}_${Date.now()}`,
-            type: 'upload',
           };
-          const result = await streamUpload(file.buffer, opts);
-          fileUrl = result.secure_url || result.url;
-          if (fileUrl && fileUrl.includes('cloudinary.com') && /\.pdf$/i.test(fileUrl)) {
-            fileUrl = fileUrl.replace(/\.pdf$/i, '.png');
+          const result = await withTimeout(
+            streamUpload(file.buffer, opts),
+            10000,
+            'Cloudinary Aadhaar upload timed out'
+          );
+          const cloudUrl = result.secure_url || result.url;
+          if (cloudUrl) {
+            fileUrl = cloudUrl;
+            console.log('Aadhaar card also uploaded to Cloudinary:', fileUrl);
           }
         } catch (cloudErr) {
-          console.error('Cloudinary upload error:', cloudErr.message);
-        }
-
-        // Fallback to local static storage if Cloudinary keys/upload fails
-        if (!fileUrl) {
-          const fs = require('fs');
-          const path = require('path');
-          const uploadsDir = path.join(__dirname, '../uploads/aadhar_cards');
-          if (!fs.existsSync(uploadsDir)) {
-            fs.mkdirSync(uploadsDir, { recursive: true });
-          }
-          const ext = path.extname(file.originalname || '.png') || '.png';
-          const fileName = `aadhar-${userId}-${Date.now()}${ext}`;
-          const filePath = path.join(uploadsDir, fileName);
-          fs.writeFileSync(filePath, file.buffer);
-          
-          const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-          const host = req.headers['x-forwarded-host'] || req.get('host') || 'api.inout.urbancode.tech';
-          fileUrl = `${protocol}://${host}/uploads/aadhar_cards/${fileName}`;
-          console.log('Saved Aadhaar card to local fallback storage:', fileUrl);
+          console.error('Cloudinary Aadhaar upload skipped:', cloudErr?.message || cloudErr);
         }
       } else {
         fileUrl = file.path || file.location || file.url;
@@ -464,7 +485,7 @@ const userController = {
       });
     } catch (error) {
       console.error('Error uploading Aadhar card:', error);
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: error.message || 'Failed to upload Aadhaar Card' });
     }
   },
 
