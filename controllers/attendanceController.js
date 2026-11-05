@@ -24,6 +24,7 @@ const {
 } = require('../services/missedAttendanceLockService');
 const { saveAttendanceImageInBackground, uploadAttendanceImageNow } = require('../middleware/upload');
 const { skipsCheckInOut } = require('../utils/skipAttendance');
+const { notifyCheckInPresent } = require('../services/seyalAttendanceService');
 
 const resolveAttendanceUserIds = async (userId) => {
   const user = await User.findById(userId).select('email employeeId phone name');
@@ -266,6 +267,11 @@ exports.markAttendance = async (req, res) => {
 
     if (req.file?.buffer && !imageUrl) {
       saveAttendanceImageInBackground(attendance._id, req.file.buffer);
+    }
+
+    // Check-in → Seyal present (clears prior leave/absent). No-op until enabled.
+    if (attendanceType === 'check-in' && user.email) {
+      notifyCheckInPresent({ email: user.email, date: attendance.timestamp });
     }
 
     const response = {

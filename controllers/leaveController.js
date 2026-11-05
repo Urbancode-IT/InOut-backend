@@ -5,6 +5,10 @@ const LeaveRequest = require('../models/LeaveRequest');
 const transporter = require('../config/emailConfig');
 const User = require('../models/User');
 const axios = require('axios');
+const {
+  notifyLeaveApproved,
+  notifyLeaveCleared,
+} = require('../services/seyalAttendanceService');
 
 /** Company policy: 1 Sick + 1 Casual + 1 Emergency leave day per employee per calendar month. */
 const MONTHLY_LEAVE_LIMITS = { Casual: 1, Sick: 1, Emergency: 1 };
@@ -396,6 +400,25 @@ const leaveController = {
 
       await transporter.sendMail(mailOptions);
 
+      // Push leave / clear mark to Seyal (no-op until SEYAL_INOUT_ENABLED=true)
+      if (updated.user?.email) {
+        if (status === 'Approved') {
+          notifyLeaveApproved({
+            email: updated.user.email,
+            fromDate: updated.fromDate,
+            toDate: updated.toDate,
+            leaveType: updated.leaveType,
+            reason: updated.reason,
+          });
+        } else if (status === 'Rejected') {
+          notifyLeaveCleared({
+            email: updated.user.email,
+            fromDate: updated.fromDate,
+            toDate: updated.toDate,
+          });
+        }
+      }
+
       res.json({ message: `Leave ${status.toLowerCase()}`, request: updated });
     } catch (err) {
       console.error('Update leave error:', err);
@@ -415,10 +438,25 @@ const leaveController = {
 
   deleteLeaveRequest: async (req, res) => {
     try {
-      const deleted = await LeaveRequest.findByIdAndDelete(req.params.id);
-      if (!deleted) {
+      const existing = await LeaveRequest.findById(req.params.id).populate(
+        'user',
+        'name email'
+      );
+      if (!existing) {
         return res.status(404).json({ error: 'Leave request not found' });
       }
+
+      await LeaveRequest.findByIdAndDelete(req.params.id);
+
+      // If approved leave is removed, clear Seyal mark for those days
+      if (existing.status === 'Approved' && existing.user?.email) {
+        notifyLeaveCleared({
+          email: existing.user.email,
+          fromDate: existing.fromDate,
+          toDate: existing.toDate,
+        });
+      }
+
       res.json({ message: 'Leave request deleted successfully' });
     } catch (err) {
       console.error('Delete leave request error:', err);

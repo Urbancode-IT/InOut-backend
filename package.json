@@ -24,6 +24,7 @@
     "new-user:send-preview": "node scripts/testNewUserWishes.js --send-preview",
     "monthly-report:dry-run": "node scripts/testMonthlyReport.js --dry-run",
     "monthly-report:send": "node scripts/testMonthlyReport.js --send",
+    "test:seyal": "node scripts/testSeyalAttendance.js",
     "start": "node index.js",
     "dev": "node index.js"
   },
@@ -47,8 +48,10 @@
     "multer-storage-cloudinary": "^4.0.0",
     "node-cron": "^4.6.0",
     "nodemailer": "^7.0.5",
+    "pdf-parse": "^2.4.5",
     "pdfkit": "^0.20.2",
     "swagger-ui-express": "^5.0.1",
+    "tesseract.js": "^7.0.0",
     "yamljs": "^0.3.0"
   }
 }
