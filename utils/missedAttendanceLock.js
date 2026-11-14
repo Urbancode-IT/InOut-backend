@@ -1,7 +1,7 @@
 const TIMEZONE = 'Asia/Kolkata';
 
 const INOUT_BLOCKED_MESSAGE =
-  'Your In-Out is locked because you did not check in, check out, or submit a leave request. Only an admin can unlock it.';
+  'Your In-Out is locked because you did not check in, check out, or submit a leave request. Submit leave for that day to unlock, or ask an admin.';
 
 const getLockHour = () => {
   const raw = Number(process.env.MISSED_ATTENDANCE_LOCK_HOUR);
@@ -76,10 +76,14 @@ const findCompletedWorkingDate = (now = new Date(), holidayKeys = new Set()) => 
 };
 
 const isUserScheduledOff = (weeklySchedule, weekday) => {
-  if (weekday === 'Saturday') return false;
+  if (!weekday) return false;
+  // Prefer saved schedule (supports Full-Time and Part-Time day-off choices)
+  if (weeklySchedule && weeklySchedule[weekday] && typeof weeklySchedule[weekday] === 'object') {
+    return weeklySchedule[weekday].isLeave === true;
+  }
+  // Legacy fallback when no day entry exists: Sunday off, Saturday working
   if (weekday === 'Sunday') return true;
-  if (!weeklySchedule || !weekday) return false;
-  return weeklySchedule[weekday]?.isLeave === true;
+  return false;
 };
 
 const wasEmployedOnDate = (user, dateKey) => {

@@ -9,9 +9,11 @@ const {
   notifyLeaveApproved,
   notifyLeaveCleared,
 } = require('../services/seyalAttendanceService');
-
-/** Company policy: 1 Sick + 1 Casual + 1 Emergency leave day per employee per calendar month. */
-const MONTHLY_LEAVE_LIMITS = { Casual: 1, Sick: 1, Emergency: 1 };
+const {
+  MONTHLY_LEAVE_LIMITS,
+  isAllowedLeaveType,
+  isForgotPunchLeaveType,
+} = require('../utils/leaveTypes');
 
 /** Parse leave dates in local calendar (avoids UTC shift on YYYY-MM-DD). */
 function startOfLocalDay(date) {
@@ -61,13 +63,16 @@ const leaveController = {
       if (!fromDate || !toDate || !reason) {
         return res.status(400).json({ error: 'Missing fields' });
       }
+      if (!isAllowedLeaveType(leaveType)) {
+        return res.status(400).json({ error: 'Invalid leave type' });
+      }
       if (startOfLocalDay(fromDate) > startOfLocalDay(toDate)) {
         return res.status(400).json({ error: 'From Date should not be after To Date' });
       }
       const user = await User.findById(req.user._id);
       if (!user) return res.status(404).json({ error: 'User not found' });
 
-      // Enforce monthly quota for Casual / Sick / Emergency.
+      // Enforce monthly quota for Casual / Sick / Emergency only.
       if (MONTHLY_LEAVE_LIMITS[leaveType] != null) {
         const existing = await LeaveRequest.find({
           user: user._id,
@@ -94,15 +99,31 @@ const leaveController = {
         }
       }
 
+      // Forgot punch is attendance correction, not leave — auto-approve so reports count Present.
       const leave = new LeaveRequest({
         user: user._id,
         fromDate,
         toDate,
         reason,
-        leaveType
+        leaveType,
+        status: isForgotPunchLeaveType(leaveType) ? 'Approved' : 'Pending',
       });
 
       await leave.save();
+
+      // Leave covering the missed locked day unlocks In-Out as soon as it is submitted.
+      let inoutUnlocked = false;
+      if (user.inoutBlocked && user.inoutBlockedForDate) {
+        const {
+          clearInoutBlock,
+          leaveCoversDateKey,
+        } = require('../utils/missedAttendanceLock');
+        if (leaveCoversDateKey(leave, user.inoutBlockedForDate)) {
+          clearInoutBlock(user);
+          await user.save();
+          inoutUnlocked = true;
+        }
+      }
 
       const mailOptions = {
         from: `InOut Portal <${process.env.NOTIFY_EMAIL}>`,
@@ -248,7 +269,7 @@ const leaveController = {
 
 
       notifyAdminsOnWhatsApp();
-      res.status(201).json({ message: 'Leave request submitted' });
+      res.status(201).json({ message: 'Leave request submitted', inoutUnlocked });
     } catch (err) {
       console.error('Leave apply error:', err);
       res.status(500).json({ error: 'Internal server error' });
@@ -400,8 +421,9 @@ const leaveController = {
 
       await transporter.sendMail(mailOptions);
 
-      // Push leave / clear mark to Seyal (no-op until SEYAL_INOUT_ENABLED=true)
-      if (updated.user?.email) {
+      // Push leave / clear mark to Seyal (no-op until SEYAL_INOUT_ENABLED=true).
+      // Forgot Check-In/Out is Present, not leave — never push as leave to Seyal.
+      if (updated.user?.email && !isForgotPunchLeaveType(updated.leaveType)) {
         if (status === 'Approved') {
           notifyLeaveApproved({
             email: updated.user.email,
@@ -419,7 +441,30 @@ const leaveController = {
         }
       }
 
-      res.json({ message: `Leave ${status.toLowerCase()}`, request: updated });
+      // Approved leave that covers the missed locked day unlocks In-Out automatically.
+      let inoutUnlocked = false;
+      if (status === 'Approved' && updated.user?._id) {
+        const {
+          clearInoutBlock,
+          leaveCoversDateKey,
+        } = require('../utils/missedAttendanceLock');
+        const lockedUser = await User.findById(updated.user._id);
+        if (
+          lockedUser?.inoutBlocked &&
+          lockedUser.inoutBlockedForDate &&
+          leaveCoversDateKey(updated, lockedUser.inoutBlockedForDate)
+        ) {
+          clearInoutBlock(lockedUser);
+          await lockedUser.save();
+          inoutUnlocked = true;
+        }
+      }
+
+      res.json({
+        message: `Leave ${status.toLowerCase()}`,
+        request: updated,
+        inoutUnlocked,
+      });
     } catch (err) {
       console.error('Update leave error:', err);
       res.status(500).json({ error: 'Internal server error' });

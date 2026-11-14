@@ -55,6 +55,15 @@ const userController = {
   address: 1,
   bloodGroup:  1,
         isActive: 1,
+        activationStatus: 1,
+        pendingRegistrationId: 1,
+        offerLetter: 1,
+        previousCompany: 1,
+        previousWorkExperience: 1,
+        previousJobRole: 1,
+        totalYearsOfExperience: 1,
+        isFresher: 1,
+        workExperience: 1,
     profilePic: 1,
     letterCopies: 1,
         skills: 1,
@@ -140,6 +149,23 @@ const userController = {
         });
       }
 
+      const isAdminSelf = req.user && req.user.role === 'admin';
+
+      // Admins are not employees — only allow account basics on self-update
+      if (isAdminSelf) {
+        const { name, email, password, phone, profilePic } = req.body;
+        const updateData = {};
+        if (name) updateData.name = name;
+        if (email) updateData.email = email;
+        if (phone !== undefined) updateData.phone = phone;
+        if (profilePic !== undefined) updateData.profilePic = profilePic;
+        if (password) updateData.password = await bcrypt.hash(password, 10);
+
+        const updated = await User.findByIdAndUpdate(userId, { $set: updateData }, { new: true }).select('-password');
+        if (!updated) return res.status(404).json({ message: 'User not found' });
+        return res.json(maskSensitiveUserFields(withProfileCompletion(updated), req.user));
+      }
+
       // Only allow a whitelist of updatable fields to avoid mass assignment
       const {
         name,
@@ -177,7 +203,7 @@ const userController = {
       if (bloodGroup) updateData.bloodGroup = bloodGroup;
       if (department) updateData.department = department;
       if (qualification) updateData.qualification = qualification;
-      if (profilePic) updateData.profilePic = profilePic;
+      if (profilePic !== undefined) updateData.profilePic = profilePic;
       if (Array.isArray(skills)) updateData.skills = skills;
       if (Array.isArray(rolesAndResponsibility)) updateData.rolesAndResponsibility = rolesAndResponsibility;
       applyBankDetailsToUpdate(updateData, bankDetails);
@@ -264,6 +290,8 @@ const userController = {
       esiNumber,
       empGrade,
       aadharNumber,
+      employmentType,
+      schedule,
     } = req.body;
 
     const updateData = {};
@@ -305,6 +333,10 @@ const userController = {
     if (esiNumber !== undefined) updateData.esiNumber = esiNumber;
     if (empGrade !== undefined) updateData.empGrade = empGrade;
     if (aadharNumber !== undefined) updateData.aadharNumber = aadharNumber;
+    if (employmentType !== undefined) {
+      updateData.employmentType =
+        String(employmentType).trim() === 'Part-Time' ? 'Part-Time' : 'Full-Time';
+    }
 
     const updatedUser = await User.findByIdAndUpdate(
       req.params.id,
@@ -313,6 +345,27 @@ const userController = {
     ).select('-password');
 
     if (!updatedUser) return res.status(404).json({ error: 'User not found' });
+
+    // Sync schedule collection when admin edits weekly hours from Edit User
+    if (schedule && typeof schedule === 'object') {
+      const schedulePayload = {
+        weeklySchedule: schedule,
+        user: updatedUser._id,
+      };
+      if (updateData.employmentType) {
+        schedulePayload.employmentType = updateData.employmentType;
+      }
+      await Schedule.findOneAndUpdate(
+        { user: updatedUser._id },
+        { $set: schedulePayload },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } else if (updateData.employmentType) {
+      await Schedule.findOneAndUpdate(
+        { user: updatedUser._id },
+        { $set: { employmentType: updateData.employmentType } }
+      );
+    }
 
     await clearIncompleteTrackingIfComplete(updatedUser);
 
@@ -376,11 +429,38 @@ const userController = {
   // Upload Aadhar card image or document and save to user.aadharCard
   uploadAadharCard: async (req, res) => {
     try {
-      const userId = req.body.userId || (req.user && req.user._id) || null;
+      const isAdmin = req.user?.role === 'admin';
+      // Employees can only upload for themselves; admins may pass userId
+      const userId = isAdmin
+        ? (req.body.userId || (req.user && req.user._id) || null)
+        : ((req.user && req.user._id) || null);
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
       const file = req.file;
       if (!file) return res.status(400).json({ message: 'No file uploaded' });
+
+      // One-time upload for employees — only admin can replace an existing card
+      const existing = await User.findById(userId).select('aadharCard aadharNumber');
+      if (!existing) return res.status(404).json({ message: 'User not found' });
+      if (!isAdmin && existing.aadharCard?.url) {
+        return res.status(403).json({
+          message: 'Aadhaar Card is already uploaded and cannot be changed. Contact admin if you need an update.',
+        });
+      }
+
+      // Employees: OCR check so random docs (PAN, DL, selfies, etc.) are rejected
+      if (!isAdmin) {
+        const { verifyAadhaarDocument } = require('../utils/verifyAadhaarDocument');
+        const verification = await verifyAadhaarDocument(file, {
+          expectedAadhaarNumber: existing.aadharNumber,
+        });
+        if (!verification.ok) {
+          return res.status(400).json({
+            message: verification.message,
+            code: 'NOT_AADHAAR_DOCUMENT',
+          });
+        }
+      }
 
       const fs = require('fs');
       const path = require('path');
@@ -504,6 +584,12 @@ const userController = {
       if (!candidateId) candidateId = uploaderId;
       if (!candidateId) return res.status(400).json({ message: 'candidateId is required' });
 
+      const candidateName = String(req.body.candidateName || '').trim();
+      const letterName = String(req.body.letterName || '').trim();
+      const letterType = String(req.body.letterType || '').trim();
+
+      const fs = require('fs');
+      const path = require('path');
       const cloudinary = require('../config/cloudinary');
       const {
         sanitizeFilename,
@@ -511,34 +597,62 @@ const userController = {
         ensurePdfFilename,
       } = require('../utils/letterStorage');
 
-      // upload buffer to Cloudinary (PDF as image type — Cloudinary recommended)
-      const streamUpload = (buffer, options) => new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
-          if (result) resolve(result);
-          else reject(error);
-        });
-        const { Readable } = require('stream');
-        const readable = new Readable();
-        readable._read = () => {};
-        readable.push(buffer);
-        readable.push(null);
-        readable.pipe(stream);
-      });
+      const PUBLIC_API = (
+        process.env.PUBLIC_API_URL || 'https://api.inout.urbancode.tech'
+      ).replace(/\/$/, '');
 
       const folder = `letter_copies/${candidateId}`;
-      const baseName = sanitizeFilename(file.originalname || 'letter');
-      const opts = {
-        folder,
-        resource_type: 'image',
-        format: 'pdf',
-        public_id: `${baseName}_${Date.now()}`,
-        type: 'upload',
-      };
-      const result = await streamUpload(file.buffer, opts);
+      // Prefer letter title for storage name so admin table shows the generated letter type
+      const preferredName =
+        letterName ||
+        file.originalname ||
+        'letter';
+      const baseName = sanitizeFilename(preferredName);
+      const typePrefix = sanitizeFilename(letterType || 'letter');
+      const stamp = Date.now();
+      const publicId = `${typePrefix}_${baseName}_${stamp}`;
 
-      const fileUrl = result.secure_url || result.url;
+      // Always keep a local copy so All Letters works even if Cloudinary rejects the signature
+      const localDir = path.join(__dirname, '../uploads', folder);
+      if (!fs.existsSync(localDir)) {
+        fs.mkdirSync(localDir, { recursive: true });
+      }
+      const localFileName = `${publicId}.pdf`;
+      fs.writeFileSync(path.join(localDir, localFileName), file.buffer);
+      let fileUrl = `${PUBLIC_API}/uploads/${folder}/${localFileName}`;
+
+      try {
+        // PDFs as raw (no format/type) — matches working aadhaar/register uploads
+        const streamUpload = (buffer, options) =>
+          new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
+              if (result) resolve(result);
+              else reject(error || new Error('Cloudinary upload returned no result'));
+            });
+            const { Readable } = require('stream');
+            const readable = new Readable();
+            readable._read = () => {};
+            readable.push(buffer);
+            readable.push(null);
+            readable.pipe(stream);
+          });
+
+        const result = await streamUpload(file.buffer, {
+          folder,
+          resource_type: 'raw',
+          public_id: publicId,
+        });
+        const cloudUrl = result.secure_url || result.url;
+        if (cloudUrl) fileUrl = cloudUrl;
+      } catch (cloudErr) {
+        console.error(
+          'Cloudinary letter upload failed, using local file:',
+          cloudErr?.message || cloudErr
+        );
+      }
+
       const filename = ensurePdfFilename(
-        file.originalname || result.original_filename || `${baseName}.pdf`
+        letterName || file.originalname || `${baseName}.pdf`
       );
       const downloadUrl = toDownloadUrl(fileUrl, filename);
 
@@ -550,6 +664,9 @@ const userController = {
             letterCopies: {
               url: fileUrl,
               filename,
+              candidateName,
+              letterName: letterName || filename.replace(/\.pdf$/i, ''),
+              letterType,
               uploadedBy: uploaderId,
               uploadedAt: new Date(),
             },
@@ -563,6 +680,10 @@ const userController = {
         message: 'Uploaded',
         url: fileUrl,
         downloadUrl,
+        filename,
+        candidateName,
+        letterName: letterName || filename.replace(/\.pdf$/i, ''),
+        letterType,
         user: maskSensitiveUserFields(updated, req.user),
       });
     } catch (error) {

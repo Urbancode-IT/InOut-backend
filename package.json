@@ -26,7 +26,9 @@
     "monthly-report:send": "node scripts/testMonthlyReport.js --send",
     "test:seyal": "node scripts/testSeyalAttendance.js",
     "start": "node index.js",
-    "dev": "node index.js"
+    "dev": "node index.js",
+    "start:local": "node scripts/startLocal.js",
+    "test:register": "node scripts/testRegisterFlowLocal.js"
   },
   "keywords": [],
   "author": "",

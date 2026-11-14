@@ -438,18 +438,44 @@ const adminController = {
    */
   downloadLetter: async (req, res) => {
     try {
+      const fs = require('fs');
+      const path = require('path');
       const axios = require('axios');
       const { toDownloadUrl, ensurePdfFilename } = require('../utils/letterStorage');
       const sourceUrl = String(req.query.url || '').trim();
       if (!sourceUrl) {
         return res.status(400).json({ error: 'url query param is required' });
       }
-      if (!sourceUrl.includes('res.cloudinary.com')) {
-        return res.status(400).json({ error: 'Only Cloudinary letter URLs are allowed' });
-      }
 
       const filename = ensurePdfFilename(req.query.filename || 'letter.pdf');
       const inline = String(req.query.inline || '') === '1';
+      const disposition = `${inline ? 'inline' : 'attachment'}; filename="${filename.replace(/"/g, '')}"`;
+
+      const sendPdf = (buf) => {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', disposition);
+        res.setHeader('Cache-Control', 'private, max-age=60');
+        return res.status(200).send(Buffer.from(buf));
+      };
+
+      // Local /uploads letters (Cloudinary fallback)
+      const uploadsMatch = sourceUrl.match(/\/uploads\/(.+)$/i);
+      if (uploadsMatch) {
+        const rel = decodeURIComponent(uploadsMatch[1]).replace(/\\/g, '/');
+        if (rel.includes('..')) {
+          return res.status(400).json({ error: 'Invalid letter path' });
+        }
+        const localPath = path.join(__dirname, '../uploads', rel);
+        if (!fs.existsSync(localPath)) {
+          return res.status(404).json({ error: 'Letter file not found on server' });
+        }
+        return sendPdf(fs.readFileSync(localPath));
+      }
+
+      if (!sourceUrl.includes('res.cloudinary.com')) {
+        return res.status(400).json({ error: 'Only Cloudinary or local upload letter URLs are allowed' });
+      }
+
       // For inline view, fetch the raw Cloudinary URL (no fl_attachment)
       const fetchUrl = inline ? sourceUrl : toDownloadUrl(sourceUrl, filename);
 
@@ -468,13 +494,7 @@ const adminController = {
             timeout: 30000,
           });
           if (retry.status < 400) {
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader(
-              'Content-Disposition',
-              `attachment; filename="${filename.replace(/"/g, '')}"`
-            );
-            res.setHeader('Cache-Control', 'private, max-age=60');
-            return res.status(200).send(Buffer.from(retry.data));
+            return sendPdf(retry.data);
           }
         }
 
@@ -488,13 +508,7 @@ const adminController = {
         });
       }
 
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader(
-        'Content-Disposition',
-        `${inline ? 'inline' : 'attachment'}; filename="${filename.replace(/"/g, '')}"`
-      );
-      res.setHeader('Cache-Control', 'private, max-age=60');
-      return res.status(200).send(Buffer.from(upstream.data));
+      return sendPdf(upstream.data);
     } catch (err) {
       console.error('Error downloading letter:', err.message);
       res.status(500).json({ error: 'Failed to download letter' });

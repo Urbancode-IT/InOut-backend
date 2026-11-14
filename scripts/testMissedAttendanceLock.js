@@ -132,7 +132,9 @@ function run() {
     assert.strictEqual(isUserScheduledOff({ Monday: { isLeave: true } }, 'Monday'), true);
     assert.strictEqual(isUserScheduledOff({ Monday: { isLeave: false } }, 'Monday'), false);
     assert.strictEqual(isUserScheduledOff(null, 'Monday'), false);
-    assert.strictEqual(isUserScheduledOff({ Saturday: { isLeave: true } }, 'Saturday'), false);
+    assert.strictEqual(isUserScheduledOff(null, 'Sunday'), true);
+    assert.strictEqual(isUserScheduledOff({ Saturday: { isLeave: true } }, 'Saturday'), true);
+    assert.strictEqual(isUserScheduledOff({ Sunday: { isLeave: false } }, 'Sunday'), false);
     pass('unit: weekly off is not a missed day');
   } catch (e) {
     fail('unit: weekly off is not a missed day', e);
@@ -165,6 +167,26 @@ function run() {
     pass('unit: IST date keys');
   } catch (e) {
     fail('unit: IST date keys', e);
+  }
+
+  try {
+    const leave = {
+      fromDate: new Date('2026-09-28T00:00:00+05:30'),
+      toDate: new Date('2026-09-28T00:00:00+05:30'),
+    };
+    const user = {
+      inoutBlocked: true,
+      inoutBlockedAt: new Date(),
+      inoutBlockedForDate: '2026-09-28',
+      inoutLockWaivedForDate: null,
+    };
+    assert.strictEqual(leaveCoversDateKey(leave, user.inoutBlockedForDate), true);
+    clearInoutBlock(user);
+    assert.strictEqual(user.inoutBlocked, false);
+    assert.strictEqual(user.inoutLockWaivedForDate, '2026-09-28');
+    pass('unit: approved leave covering locked day can clear the block');
+  } catch (e) {
+    fail('unit: approved leave covering locked day can clear the block', e);
   }
 }
 
