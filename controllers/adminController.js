@@ -385,6 +385,8 @@ const adminController = {
             url: '$letterCopies.url',
             uploadedBy: '$letterCopies.uploadedBy',
             uploadedAt: '$letterCopies.uploadedAt',
+            // Offer form name (legacy letterCopies often omitted candidateName)
+            offerCandidateName: '$offerLetter.details.candidateName',
           },
         },
         { $sort: { uploadedAt: -1 } },
@@ -405,8 +407,11 @@ const adminController = {
             }) || '';
 
           const displayFilename = ensurePdfFilename(displayLetterName);
-          // Prefer the name written on the letter; do not fall back to account name
-          const letterPersonName = String(row.candidateName || '').trim();
+          // Prefer name on the letter copy → offer letter form name → employee account name
+          const letterPersonName =
+            String(row.candidateName || '').trim() ||
+            String(row.offerCandidateName || '').trim() ||
+            String(row.userName || '').trim();
 
           return {
             ...row,
