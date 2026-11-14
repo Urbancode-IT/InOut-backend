@@ -6,6 +6,54 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const PendingUser = require('../models/PendingUser');
 const transporter = require('../config/emailConfig');
+const { uploadRegisterFile } = require('../utils/registerFileUpload');
+const {
+  isValidPhone,
+  isValidBloodGroup,
+  validateAndNormalizeBankDetails,
+  validateAndNormalizeWorkExperience,
+  calculateTotalYearsFromWorkExperience,
+  deriveLegacyExperienceFields,
+} = require('../utils/registrationValidation');
+
+function parseMaybeJson(value, fallback) {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function parseMaybeList(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value !== 'string' || !value.trim()) return [];
+  // FormData may send comma-separated or JSON array string
+  const trimmed = value.trim();
+  if (trimmed.startsWith('[')) {
+    const parsed = parseMaybeJson(trimmed, null);
+    if (Array.isArray(parsed)) return parsed.map((s) => String(s).trim()).filter(Boolean);
+  }
+  return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatTotalExperience(years, isFresher) {
+  if (years == null || years === '' || Number.isNaN(Number(years))) {
+    return isFresher ? '0 years' : 'N/A';
+  }
+  const amount = Number(years);
+  return `${amount} ${amount === 1 ? 'year' : 'years'}`;
+}
 
 const authController = {
   login: async (req, res) => {
@@ -46,6 +94,8 @@ const authController = {
 
   register: async (req, res) => {
     try {
+      // Multipart without multer leaves req.body undefined — never destructure raw.
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
       const {
         name,
         email,
@@ -60,30 +110,161 @@ const authController = {
         dateOfBirth,
         rolesAndResponsibility,
         skills,
-        profilePic,
+        profilePic: profilePicUrl,
         bloodGroup,
         address,
+        branch,
+        aadharNumber,
         bankDetails,
-        schedule
-      } = req.body;
+        schedule,
+        employmentType,
+        previousCompany,
+        previousWorkExperience,
+        previousJobRole,
+        totalYearsOfExperience,
+        workExperience,
+        isFresher,
+      } = body;
 
       // Validate required fields
       if (!name || !email || !password || !phone || !position || !company) {
         return res.status(400).json({ error: 'All required fields must be filled' });
       }
 
-      // Check duplicates
+      // Salary is set by admin only after registration (defaults to 0)
+      if (!department || !String(department).trim()) {
+        return res.status(400).json({ error: 'Department is required.' });
+      }
+      if (!qualification || !String(qualification).trim()) {
+        return res.status(400).json({ error: 'Qualification is required.' });
+      }
+      if (!dateOfJoining) {
+        return res.status(400).json({ error: 'Date of joining is required.' });
+      }
+      if (!rolesAndResponsibility || !String(rolesAndResponsibility).trim()) {
+        return res.status(400).json({ error: 'Roles & responsibilities are required.' });
+      }
+      if (!skills || !String(skills).trim()) {
+        return res.status(400).json({ error: 'Skills are required.' });
+      }
+
+      if (!isValidPhone(String(phone))) {
+        return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number.' });
+      }
+
+      if (!isValidBloodGroup(bloodGroup)) {
+        return res.status(400).json({ error: 'Please select your blood group.' });
+      }
+
+      const fresherFlag =
+        isFresher === true ||
+        isFresher === 'true' ||
+        isFresher === '1' ||
+        String(isFresher || '').toLowerCase() === 'fresher';
+
+      const { workExperience: normalizedWorkExperience, error: workExpError } =
+        validateAndNormalizeWorkExperience(workExperience, { isFresher: fresherFlag });
+      if (workExpError) {
+        return res.status(400).json({ error: workExpError });
+      }
+
+      const bankWithOffice = typeof bankDetails === 'string'
+        ? (() => { try { return JSON.parse(bankDetails); } catch (_) { return bankDetails; } })()
+        : bankDetails;
+      const bankPayload =
+        bankWithOffice && typeof bankWithOffice === 'object'
+          ? { ...bankWithOffice, officeBranch: bankWithOffice.officeBranch || branch || '' }
+          : bankDetails;
+      const { bankDetails: normalizedBankDetails, error: bankError } =
+        validateAndNormalizeBankDetails(bankPayload);
+      if (bankError) {
+        return res.status(400).json({ error: bankError });
+      }
+
+      const calculatedYears = fresherFlag
+        ? 0
+        : calculateTotalYearsFromWorkExperience(normalizedWorkExperience);
+
+      let yearsRaw =
+        totalYearsOfExperience === undefined || totalYearsOfExperience === null || totalYearsOfExperience === ''
+          ? calculatedYears
+          : Number(totalYearsOfExperience);
+      if (fresherFlag) yearsRaw = 0;
+      if (yearsRaw != null && (Number.isNaN(yearsRaw) || yearsRaw < 0 || yearsRaw > 60)) {
+        return res.status(400).json({ error: 'Total Years of Experience must be a number between 0 and 60' });
+      }
+
+      const legacyFromWork = deriveLegacyExperienceFields(normalizedWorkExperience);
+      const legacyPreviousCompany = fresherFlag
+        ? ''
+        : (previousCompany || legacyFromWork.previousCompany || '');
+      const legacyPreviousJobRole = fresherFlag
+        ? ''
+        : (previousJobRole || legacyFromWork.previousJobRole || '');
+      const legacyPreviousWorkExperience = fresherFlag
+        ? ''
+        : (previousWorkExperience || legacyFromWork.previousWorkExperience || '');
+
+      // Check duplicates — include inactive users prepared for offer
       const existingUser = await User.findOne({ email });
       const existingPending = await PendingUser.findOne({ email });
 
-      if (existingUser || existingPending) {
+      if (existingPending) {
         return res.status(400).json({ error: 'Email already in use or pending approval' });
       }
+      if (existingUser && existingUser.isActive !== false) {
+        return res.status(400).json({ error: 'Email already in use or pending approval' });
+      }
+      if (existingUser && existingUser.isActive === false && existingUser.offerLetter?.status === 'Accepted') {
+        return res.status(400).json({ error: 'Email already in use or pending approval' });
+      }
+      if (existingUser && existingUser.isActive === false) {
+        return res.status(400).json({
+          error: 'A registration for this email is already in progress. Please contact admin.',
+        });
+      }
+
+      const profileFile = req.files?.profilePic?.[0];
+      const resumeFile = req.files?.resume?.[0];
+      const aadharFile = req.files?.aadharCard?.[0];
+
+      if (!profileFile) {
+        return res.status(400).json({ error: 'Profile picture is required' });
+      }
+      if (!resumeFile) {
+        return res.status(400).json({ error: 'Resume (PDF) is required' });
+      }
+      if (!aadharFile) {
+        return res.status(400).json({ error: 'Aadhaar card document is required' });
+      }
+
+      const emailKey = String(email).toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+      const [profileUpload, resumeUpload, aadharUpload] = await Promise.all([
+        uploadRegisterFile(profileFile, {
+          folder: `registrations/${emailKey}/profile`,
+          publicIdPrefix: 'profile',
+          resourceType: 'image',
+        }),
+        uploadRegisterFile(resumeFile, {
+          folder: `registrations/${emailKey}/resume`,
+          publicIdPrefix: 'resume',
+          resourceType: 'raw',
+        }),
+        uploadRegisterFile(aadharFile, {
+          folder: `registrations/${emailKey}/aadhar`,
+          publicIdPrefix: 'aadhar',
+        }),
+      ]);
 
       // Hash the password
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Create pending user with all schema fields
+      const parsedSchedule = parseMaybeJson(schedule, undefined);
+      const normalizedEmploymentType =
+        String(employmentType || '').trim() === 'Part-Time' ? 'Part-Time' : 'Full-Time';
+
+      // Create pending user — NOT an active employee (cannot log in until offer acceptance)
       const pending = new PendingUser({
         name,
         email,
@@ -91,59 +272,239 @@ const authController = {
         phone,
         position,
         company,
-        salary: salary || 0,
-        department,
+        salary: salary ? Number(salary) : 0,
+        department: department || branch || '',
+        branch: branch || '',
         qualification,
-        dateOfJoining,
-        dateOfBirth,
-        rolesAndResponsibility: rolesAndResponsibility || [],
-        skills: skills || [],
-        profilePic: profilePic || '',
-        bloodGroup,
+        dateOfJoining: dateOfJoining || undefined,
+        dateOfBirth: dateOfBirth || undefined,
+        rolesAndResponsibility: parseMaybeList(rolesAndResponsibility),
+        skills: parseMaybeList(skills),
+        profilePic: profileUpload?.url || profilePicUrl || '',
+        bloodGroup: String(bloodGroup).trim(),
         address,
-
-        bankDetails,
-        schedule
+        aadharNumber: aadharNumber || '',
+        aadharCard: aadharUpload || undefined,
+        resume: resumeUpload || undefined,
+        bankDetails: normalizedBankDetails,
+        employmentType: normalizedEmploymentType,
+        schedule: parsedSchedule,
+        isFresher: fresherFlag,
+        workExperience: normalizedWorkExperience,
+        previousCompany: legacyPreviousCompany,
+        previousWorkExperience: legacyPreviousWorkExperience,
+        previousJobRole: legacyPreviousJobRole,
+        totalYearsOfExperience: yearsRaw,
+        registrationStatus: 'Pending Review',
       });
 
       await pending.save();
 
-      // Email Notification
+      const portalBase = (
+        process.env.FRONTEND_URL ||
+        process.env.CLIENT_URL ||
+        'https://inout.urbancode.tech'
+      ).replace(/\/$/, '');
+      const reviewLink = `${portalBase}/pending-users`;
+      const letterLink = `${portalBase}/letter-generator`;
+
+      const employeeName = pending.name || 'N/A';
+      const emailAddress = pending.email || 'N/A';
+      const mobileNumber = pending.phone || 'N/A';
+      const bloodGroupLabel = pending.bloodGroup || 'N/A';
+      const companyRole =
+        [pending.position, pending.company].filter((part) => String(part || '').trim()).join(' - ') || 'N/A';
+      const experienceType = pending.isFresher ? 'Fresher' : 'Experienced';
+      const previousCompanyLabel = pending.previousCompany || 'N/A';
+      const workHistoryEntries = (pending.workExperience || []).length;
+      const totalExperience = formatTotalExperience(pending.totalYearsOfExperience, pending.isFresher);
+
+      const detailRows = [
+        ['Employee Name', employeeName],
+        ['Email Address', emailAddress],
+        ['Mobile Number', mobileNumber],
+        ['Blood Group', bloodGroupLabel],
+        ['Company Role', companyRole],
+        ['Experience Type', experienceType],
+        ['Previous Company', previousCompanyLabel],
+        ['Work History Entries', String(workHistoryEntries)],
+        ['Total Work Experience', totalExperience],
+      ];
+
+      const text = `Dear HR Team,
+
+A new employee registration has been successfully submitted through the InOut Employee Registration Portal.
+
+The submitted registration is currently marked as Pending Review and requires your attention.
+
+Employee Registration Details
+
+- Employee Name: ${employeeName}
+- Email Address: ${emailAddress}
+- Mobile Number: ${mobileNumber}
+- Blood Group: ${bloodGroupLabel}
+- Company Role: ${companyRole}
+- Experience Type: ${experienceType}
+- Previous Company: ${previousCompanyLabel}
+- Work History Entries: ${workHistoryEntries}
+- Total Work Experience: ${totalExperience}
+
+Submitted Documents:
+- Profile Picture
+- Resume
+- Aadhaar Card
+
+Required Action
+
+Please review the submitted employee information and attached documents through the InOut Admin Panel:
+${reviewLink}
+
+Once the registration details have been verified, proceed with the Offer Letter generation through the existing Letter Generator:
+${letterLink}
+
+Registration Status: Pending Review
+
+Please ensure that all submitted information is verified before proceeding with the next stage of the onboarding process.
+
+Best Regards,
+HR Management System
+InOut – Urbancode
+
+This is an automated notification from the InOut Employee Management System. Please do not reply to this email.`;
+
+      const detailsHtml = detailRows
+        .map(([label, value], index) => {
+          const border = index === detailRows.length - 1 ? 'none' : '1px solid #e5e7eb';
+          return `
+            <tr>
+              <td style="padding:10px 14px;border-bottom:${border};width:42%;font-size:13px;font-weight:700;color:#374151;vertical-align:top;">${escapeHtml(label)}</td>
+              <td style="padding:10px 14px;border-bottom:${border};font-size:14px;color:#111827;vertical-align:top;">${escapeHtml(value)}</td>
+            </tr>`;
+        })
+        .join('');
+
+      // Email Notification (existing admin notify channel)
       const mailOptions = {
-        from: process.env.NOTIFY_EMAIL,
+        from: process.env.NOTIFY_EMAIL || process.env.SENDER_EMAIL || 'noreply@inout.local',
         to: [
           process.env.NOTIFY_EMAIL,
           'admin@urbancode.in',
           'wepenit2020@gmail.com',
           'jayaprathap.rajan27@gmail.com',
-
-        ],
-        subject: '🚀 New User Registration Alert for INOUT!',
+        ].filter((addr) => String(addr || '').trim()),
+        subject: `New Registration Received for InOut – ${employeeName}`,
+        text,
         html: `
-        <div style="font-family: Arial, sans-serif; border: 1px solid #e0e0e0; border-radius: 10px; padding: 20px; background: #f9f9ff;">
-          <h2 style="color: #6366f1;">👤 New Registration Received for InOut</h2>
-          <p><strong>👨‍💼 Name:</strong> ${pending.name}</p><br/>
-          <p><strong>📧 Email:</strong> ${pending.email}</p><br/>
-          <p><strong>📱 Phone:</strong> ${pending.phone || 'N/A'}</p><br/>
-          <p><strong>🏢 Company Role:</strong> ${pending.position} - ${pending.company}</p><br/>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>New Registration Received for InOut</title>
+        </head>
+        <body style="margin:0;padding:0;background:#f4f6fb;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fb;padding:24px 12px;">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+                  <tr>
+                    <td style="background:#1d4ed8;padding:22px 28px;">
+                      <div style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#dbeafe;font-weight:700;">InOut – Urbancode</div>
+                      <div style="font-size:22px;line-height:1.35;color:#ffffff;font-weight:700;margin-top:6px;">New Registration Received</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:28px 28px 8px;">
+                      <p style="margin:0 0 14px;font-size:15px;line-height:1.65;">Dear HR Team,</p>
+                      <p style="margin:0 0 14px;font-size:15px;line-height:1.65;">A new employee registration has been successfully submitted through the InOut Employee Registration Portal.</p>
+                      <p style="margin:0 0 22px;font-size:15px;line-height:1.65;">The submitted registration is currently marked as <strong>Pending Review</strong> and requires your attention.</p>
 
-          <hr style="margin: 20px 0;" />
+                      <p style="margin:0 0 10px;font-size:16px;font-weight:700;color:#0b2d67;">Employee Registration Details</p>
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;border-collapse:separate;overflow:hidden;margin:0 0 22px;">
+                        ${detailsHtml}
+                      </table>
 
-          <p style="font-size: 14px;">🔐 Action Required: Login to the 
-            <a href="https://inout.urbancode.tech/" style="color: #4f46e5;">Admin Panel</a> to approve this user.
-          </p>
-          <p style="font-size: 13px; color: #999;">📅 ${new Date().toLocaleString()}</p>
-        </div>
+                      <p style="margin:0 0 8px;font-size:16px;font-weight:700;color:#0b2d67;">Submitted Documents</p>
+                      <ul style="margin:0 0 22px;padding-left:20px;font-size:15px;line-height:1.7;color:#111827;">
+                        <li>Profile Picture</li>
+                        <li>Resume</li>
+                        <li>Aadhaar Card</li>
+                      </ul>
+
+                      <div style="background:#eef2ff;border-left:4px solid #1d4ed8;padding:16px 18px;border-radius:0 8px 8px 0;margin:0 0 22px;">
+                        <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#1d4ed8;">Required Action</p>
+                        <p style="margin:0 0 14px;font-size:14px;line-height:1.65;color:#374151;">Please review the submitted employee information and attached documents through the InOut Admin Panel.</p>
+                        <p style="margin:0 0 16px;">
+                          <a href="${reviewLink}" style="background:#1d4ed8;color:#ffffff;text-decoration:none;padding:11px 18px;border-radius:6px;display:inline-block;font-weight:700;font-size:14px;">Open Admin Pending Approvals</a>
+                        </p>
+                        <p style="margin:0 0 10px;font-size:14px;line-height:1.65;color:#374151;">Once the registration details have been verified, proceed with the Offer Letter generation through the existing Letter Generator.</p>
+                        <p style="margin:0;">
+                          <a href="${letterLink}" style="color:#1d4ed8;font-weight:700;font-size:14px;">Open Letter Generator</a>
+                        </p>
+                      </div>
+
+                      <p style="margin:0 0 14px;font-size:15px;line-height:1.65;"><strong>Registration Status:</strong> Pending Review</p>
+                      <p style="margin:0 0 22px;font-size:15px;line-height:1.65;">Please ensure that all submitted information is verified before proceeding with the next stage of the onboarding process.</p>
+                      <p style="margin:0 0 8px;font-size:15px;line-height:1.65;">Best Regards,<br/><strong>HR Management System</strong><br/><strong>InOut – Urbancode</strong></p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="background:#f8fafc;padding:16px 28px;border-top:1px solid #e5e7eb;">
+                      <p style="margin:0;font-size:12px;line-height:1.6;color:#6b7280;font-style:italic;">This is an automated notification from the InOut Employee Management System. Please do not reply to this email.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
       `
       };
 
-      transporter.sendMail(mailOptions);
+      // Never block registration on email failures
+      try {
+        if (transporter?.isEmailConfigured?.()) {
+          transporter.sendMail(mailOptions).catch((mailErr) => {
+            console.error('Registration notify email failed:', mailErr?.message || mailErr);
+          });
+        } else if (String(process.env.LOCAL_EMAIL_LOG || '').toLowerCase() === 'true') {
+          console.log('\n========== LOCAL REGISTRATION ALERT EMAIL (not sent) ==========');
+          console.log('To:', Array.isArray(mailOptions.to) ? mailOptions.to.join(', ') : mailOptions.to);
+          console.log('Subject:', mailOptions.subject);
+          console.log('Preview:', `New registration from ${pending.name} <${pending.email}>`);
+          console.log('================================================================\n');
+        } else {
+          console.warn('Registration saved but email is not configured — skipping notify');
+        }
+      } catch (mailErr) {
+        console.error('Registration notify email failed:', mailErr?.message || mailErr);
+      }
 
-      res.status(201).json({ message: 'Registration submitted and pending admin approval' });
+      res.status(201).json({
+        message: 'Registration submitted and pending admin approval',
+        registrationStatus: 'Pending Review',
+      });
 
     } catch (error) {
       console.error('Registration error:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      if (error?.name === 'ValidationError') {
+        const first = Object.values(error.errors || {})[0];
+        return res.status(400).json({
+          error: first?.message || 'Invalid registration data',
+        });
+      }
+      if (error?.code === 11000) {
+        return res.status(400).json({ error: 'Email already in use or pending approval' });
+      }
+      if (error?.name === 'CastError') {
+        return res.status(400).json({
+          error: `Invalid value for ${error.path || 'field'}. Please check bank details and schedule.`,
+        });
+      }
+      res.status(500).json({
+        error: error?.message ? `Registration failed: ${error.message}` : 'Internal server error',
+      });
     }
   },
 

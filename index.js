@@ -1,4 +1,10 @@
 // index.js
+// Node 22+/26 removed SlowBuffer; older jwt deps (jwa) still touch it at require-time.
+const buffer = require('buffer');
+if (typeof buffer.SlowBuffer === 'undefined') {
+  buffer.SlowBuffer = buffer.Buffer;
+}
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -62,12 +68,13 @@ try {
 
 // Ping Route
 app.get('/ping', (req, res) => res.send('pong'));
-app.get('/version', (req, res) => res.json({ build: 'backend-deploy-v23-reminder-sunday-holiday-skip' }));
+app.get('/version', (req, res) => res.json({ build: 'backend-deploy-v26-register-multipart-fix' }));
 
 // Route Mounts 
 app.use('/attendance', require('./routes/attendanceRoutes'));
 app.use('/auth', require('./routes/authRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/offers', require('./routes/offerRoutes'));
 app.use('/users', require('./routes/userRoutes'));
 app.use('/api/tasks', require('./routes/taskRoutes'));
 app.use('/api/leaves', require('./routes/leaveRoutes'));

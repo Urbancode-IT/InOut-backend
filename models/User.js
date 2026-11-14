@@ -2,6 +2,10 @@ const mongoose = require('mongoose');
 
 // Define BankDetails as a sub-schema
 const BankDetailsSchema = new mongoose.Schema({
+  accountHolderName: {
+    type: String,
+    default: ''
+  },
   bankingName: {
     type: String
   },
@@ -10,6 +14,15 @@ const BankDetailsSchema = new mongoose.Schema({
   },
   ifscCode: {
     type: String
+  },
+  branchName: {
+    type: String,
+    default: ''
+  },
+  accountType: {
+    type: String,
+    enum: ['', 'Savings', 'Current'],
+    default: ''
   },
   upiId: {
     type: String
@@ -24,6 +37,22 @@ const WorkSchema = new mongoose.Schema({
   department: { type: String, default: '' },
   position: { type: String, default: '' },
   branch: { type: String, default: '' },
+}, { _id: false });
+
+const WorkExperienceSchema = new mongoose.Schema({
+  companyName: { type: String, default: '' },
+  jobRole: { type: String, default: '' },
+  startDate: { type: String, default: '' },
+  endDate: { type: String, default: null },
+  startDay: { type: Number, default: null },
+  startMonth: { type: Number, default: null },
+  startYear: { type: Number, default: null },
+  endDay: { type: Number, default: null },
+  endMonth: { type: Number, default: null },
+  endYear: { type: Number, default: null },
+  currentlyWorking: { type: Boolean, default: false },
+  responsibilities: { type: String, default: '' },
+  reasonForLeaving: { type: String, default: '' },
 }, { _id: false });
 
 // Main User schema
@@ -127,6 +156,11 @@ const UserSchema = new mongoose.Schema({
     filename: { type: String, default: '' },
     uploadedAt: { type: Date }
   },
+  resume: {
+    url: { type: String, default: '' },
+    filename: { type: String, default: '' },
+    uploadedAt: { type: Date }
+  },
   // Sequential employee identifier (e.g. UC0001, JZ0001)
   employeeId: {
     type: String,
@@ -140,11 +174,95 @@ const UserSchema = new mongoose.Schema({
       {
         url: { type: String },
         filename: { type: String },
+        // Name shown on the letter (may differ from the User.name)
+        candidateName: { type: String, default: '' },
+        // Human letter title, e.g. "Offer Letter"
+        letterName: { type: String, default: '' },
+        // Generator key: offer | experience | relieving | internship-offer | internship | uploaded
+        letterType: { type: String, default: '' },
         uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-        uploadedAt: { type: Date, default: Date.now }
+        uploadedAt: { type: Date, default: Date.now },
+        // Offer workflow versioning
+        version: { type: Number, default: 1 },
+        outdated: { type: Boolean, default: false },
       }
     ],
     default: []
+  },
+
+  // Experience fields (from registration / offer onboarding)
+  isFresher: { type: Boolean, default: false },
+  workExperience: { type: [WorkExperienceSchema], default: [] },
+  previousCompany: { type: String, default: '' },
+  previousWorkExperience: { type: String, default: '' },
+  previousJobRole: { type: String, default: '' },
+  totalYearsOfExperience: { type: Number, default: null },
+
+  // Full-Time | Part-Time — drives schedule expectations & offer letter defaults
+  employmentType: {
+    type: String,
+    enum: ['Full-Time', 'Part-Time', ''],
+    default: 'Full-Time',
+  },
+
+  // Link back to PendingUser while awaiting offer acceptance
+  pendingRegistrationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PendingUser',
+    default: null,
+    index: true
+  },
+
+  // Pending Activation | Active | Inactive (mirrors isActive for admin UI)
+  activationStatus: {
+    type: String,
+    enum: ['Pending Activation', 'Active', 'Inactive'],
+    default: 'Active',
+  },
+
+  // Offer letter onboarding workflow (admin-managed)
+  offerLetter: {
+    status: {
+      type: String,
+      enum: ['Not Generated', 'Generated', 'Sent', 'Accepted', 'Declined', 'Expired'],
+      default: 'Not Generated',
+    },
+    details: {
+      candidateName: { type: String, default: '' },
+      email: { type: String, default: '' },
+      phone: { type: String, default: '' },
+      addressLine1: { type: String, default: '' },
+      addressLine2: { type: String, default: '' },
+      designation: { type: String, default: '' },
+      department: { type: String, default: '' },
+      company: { type: String, default: '' },
+      salary: { type: String, default: '' },
+      joiningDate: { type: String, default: '' },
+      offerDate: { type: String, default: '' },
+      probationPeriod: { type: String, default: '' },
+      noticePeriod: { type: String, default: '' },
+      workingHours: { type: String, default: '' },
+      workLocation: { type: String, default: '' },
+      workLocationBranch: { type: String, default: '' },
+      reportingManager: { type: String, default: '' },
+      employmentType: { type: String, default: '' },
+      letterTemplate: { type: String, default: 'Standard' },
+    },
+    detailsSnapshot: { type: String, default: '' },
+    pdfUrl: { type: String, default: '' },
+    pdfFilename: { type: String, default: '' },
+    pdfVersion: { type: Number, default: 0 },
+    generatedAt: { type: Date, default: null },
+    pdfOutdated: { type: Boolean, default: false },
+    sentAt: { type: Date, default: null },
+    lastEmailError: { type: String, default: '' },
+    acceptanceTokenHash: { type: String, default: '', select: false },
+    tokenExpiresAt: { type: Date, default: null },
+    tokenUsedAt: { type: Date, default: null },
+    acceptedAt: { type: Date, default: null },
+    declinedAt: { type: Date, default: null },
+    preparedAt: { type: Date, default: null },
+    preparedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
 
   // Profile-completion grace / attendance lock (backend-only; no countdown shown to users)

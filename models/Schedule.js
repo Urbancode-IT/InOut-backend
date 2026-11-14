@@ -23,6 +23,11 @@ const ScheduleSchema = new mongoose.Schema({
     Saturday: DaySchedule,
     Sunday: DaySchedule
   },
+  employmentType: {
+    type: String,
+    enum: ['Full-Time', 'Part-Time', ''],
+    default: 'Full-Time',
+  },
   salary: { type: Number, default: 0 }
 }, { timestamps: true });
 

@@ -178,49 +178,140 @@ const adminController = {
 
   getPendingUsers: async (req, res) => {
     try {
-      const pendingUsers = await PendingUser.find();
-      res.json(pendingUsers);
+      const pendingUsers = await PendingUser.find().sort({ createdAt: -1 }).lean();
+      const linkedIds = pendingUsers
+        .map((p) => p.linkedUserId)
+        .filter(Boolean);
+      const linkedUsers = linkedIds.length
+        ? await User.find({ _id: { $in: linkedIds } })
+            .select('isActive activationStatus offerLetter.status offerLetter.sentAt offerLetter.pdfOutdated')
+            .lean()
+        : [];
+      const byId = Object.fromEntries(linkedUsers.map((u) => [String(u._id), u]));
+
+      res.json(
+        pendingUsers.map((p) => {
+          const linked = p.linkedUserId ? byId[String(p.linkedUserId)] : null;
+          return {
+            ...p,
+            registrationStatus: p.registrationStatus || 'Pending Review',
+            offerStatus: linked?.offerLetter?.status || 'Not Generated',
+            offerPdfOutdated: linked?.offerLetter?.pdfOutdated === true,
+            employeeActivationStatus: linked
+              ? linked.activationStatus ||
+                (linked.isActive === false ? 'Pending Activation' : 'Active')
+              : 'Pending Activation',
+          };
+        })
+      );
     } catch (error) {
       console.error('Error fetching pending users:', error);
       res.status(500).json({ error: 'Failed to fetch pending users' });
     }
   },
 
+  /**
+   * Legacy direct approve: creates an ACTIVE employee immediately (no offer letter).
+   * Preferred onboarding path is prepare-offer → send → accept.
+   */
   approveUser: async (req, res) => {
     try {
       const pending = await PendingUser.findById(req.params.id);
       if (!pending) return res.status(404).json({ error: 'Pending user not found' });
 
-      const user = new User({
-        name: pending.name,
-        email: pending.email,
-        password: pending.password,
-        phone: pending.phone,
-        position: pending.position,
-        company: pending.company,
-        role: 'employee',
-        salary: pending.salary,
-        department: pending.department,
-        qualification: pending.qualification,
-        dateOfJoining: pending.dateOfJoining,
-        dateOfBirth: pending.dateOfBirth,
-        employeeId: pending.employeeId,
-        rolesAndResponsibility: pending.rolesAndResponsibility,
-        skills: pending.skills,
-        profilePic: pending.profilePic,
-        bloodGroup: pending.bloodGroup,
-        address: pending.address,
-        bankDetails: pending.bankDetails,
-        schedule: pending.schedule,
-      });
-      await user.save();
+      // Prefer activating an already-prepared inactive account (from Offer Letter flow)
+      let user = null;
+      if (pending.linkedUserId) {
+        user = await User.findById(pending.linkedUserId);
+      }
+      if (!user) {
+        user = await User.findOne({ email: pending.email });
+      }
 
-      if (pending.schedule) {
-        const userSchedule = new Schedule({
-          user: user._id,
-          weeklySchedule: pending.schedule,
+      if (user) {
+        user.isActive = true;
+        user.activationStatus = 'Active';
+        user.pendingRegistrationId = null;
+        user.previousCompany = pending.previousCompany || user.previousCompany || '';
+        user.previousWorkExperience =
+          pending.previousWorkExperience || user.previousWorkExperience || '';
+        user.previousJobRole = pending.previousJobRole || user.previousJobRole || '';
+        user.totalYearsOfExperience =
+          pending.totalYearsOfExperience != null
+            ? pending.totalYearsOfExperience
+            : user.totalYearsOfExperience;
+        user.isFresher = pending.isFresher === true;
+        user.workExperience = Array.isArray(pending.workExperience)
+          ? pending.workExperience
+          : user.workExperience || [];
+        user.employmentType =
+          pending.employmentType === 'Part-Time' ? 'Part-Time' : 'Full-Time';
+        if (pending.bloodGroup) user.bloodGroup = pending.bloodGroup;
+        if (user.offerLetter && user.offerLetter.status !== 'Accepted') {
+          user.offerLetter.status = 'Accepted';
+          user.offerLetter.acceptedAt = new Date();
+        }
+        await user.save();
+
+        if (pending.schedule) {
+          await Schedule.findOneAndUpdate(
+            { user: user._id },
+            {
+              $set: {
+                weeklySchedule: pending.schedule,
+                employmentType: user.employmentType,
+                user: user._id,
+              },
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
+        }
+      } else {
+        user = new User({
+          name: pending.name,
+          email: pending.email,
+          password: pending.password,
+          phone: pending.phone,
+          position: pending.position,
+          company: pending.company,
+          role: 'employee',
+          salary: pending.salary,
+          department: pending.department,
+          branch: pending.branch || '',
+          qualification: pending.qualification,
+          dateOfJoining: pending.dateOfJoining,
+          dateOfBirth: pending.dateOfBirth,
+          employeeId: pending.employeeId,
+          rolesAndResponsibility: pending.rolesAndResponsibility,
+          skills: pending.skills,
+          profilePic: pending.profilePic,
+          bloodGroup: pending.bloodGroup,
+          address: pending.address,
+          aadharNumber: pending.aadharNumber || '',
+          aadharCard: pending.aadharCard?.url ? pending.aadharCard : undefined,
+          resume: pending.resume?.url ? pending.resume : undefined,
+          bankDetails: pending.bankDetails,
+          employmentType: pending.employmentType === 'Part-Time' ? 'Part-Time' : 'Full-Time',
+          schedule: pending.schedule,
+          previousCompany: pending.previousCompany || '',
+          previousWorkExperience: pending.previousWorkExperience || '',
+          previousJobRole: pending.previousJobRole || '',
+          totalYearsOfExperience: pending.totalYearsOfExperience,
+          isFresher: pending.isFresher === true,
+          workExperience: Array.isArray(pending.workExperience) ? pending.workExperience : [],
+          isActive: true,
+          activationStatus: 'Active',
         });
-        await userSchedule.save();
+        await user.save();
+
+        if (pending.schedule) {
+          const userSchedule = new Schedule({
+            user: user._id,
+            weeklySchedule: pending.schedule,
+            employmentType: pending.employmentType === 'Part-Time' ? 'Part-Time' : 'Full-Time',
+          });
+          await userSchedule.save();
+        }
       }
 
       await PendingUser.findByIdAndDelete(pending._id);
@@ -228,7 +319,10 @@ const adminController = {
       const { notifyNewUserApprovedSafe } = require('../services/newUserWishService');
       notifyNewUserApprovedSafe(user);
 
-      res.json({ message: 'User approved and created successfully.' });
+      res.json({
+        message:
+          'User approved and activated successfully (direct approve — preferred path is Offer Letter acceptance).',
+      });
     } catch (error) {
       console.error('Approval error:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -237,8 +331,29 @@ const adminController = {
 
   rejectUser: async (req, res) => {
     try {
-      const deletedUser = await PendingUser.findByIdAndDelete(req.params.id);
-      if (!deletedUser) return res.status(404).json({ error: 'User not found' });
+      const pending = await PendingUser.findById(req.params.id);
+      if (!pending) return res.status(404).json({ error: 'User not found' });
+
+      // If an inactive offer account was prepared, keep it inactive / mark declined
+      if (pending.linkedUserId) {
+        const linked = await User.findById(pending.linkedUserId);
+        if (linked && linked.isActive === false) {
+          if (!linked.offerLetter) linked.offerLetter = {};
+          if (linked.offerLetter.status !== 'Accepted') {
+            linked.offerLetter.status = 'Declined';
+            linked.offerLetter.declinedAt = new Date();
+          }
+          linked.activationStatus = 'Inactive';
+          linked.pendingRegistrationId = null;
+          linked.markModified('offerLetter');
+          await linked.save();
+        }
+      }
+
+      pending.registrationStatus = 'Rejected';
+      pending.rejectedAt = new Date();
+      await pending.save();
+      await PendingUser.findByIdAndDelete(pending._id);
 
       res.status(200).json({ message: 'Pending user rejected and removed' });
     } catch (err) {
@@ -249,7 +364,12 @@ const adminController = {
 
   getAllLetters: async (req, res) => {
     try {
-      const { toDownloadUrl } = require('../utils/letterStorage');
+      const {
+        toDownloadUrl,
+        ensurePdfFilename,
+        resolveLetterDisplayName,
+        inferLetterType,
+      } = require('../utils/letterStorage');
       const letters = await User.aggregate([
         { $unwind: { path: '$letterCopies', preserveNullAndEmptyArrays: false } },
         {
@@ -259,6 +379,9 @@ const adminController = {
             userName: '$name',
             userEmail: '$email',
             filename: '$letterCopies.filename',
+            candidateName: '$letterCopies.candidateName',
+            letterName: '$letterCopies.letterName',
+            letterType: '$letterCopies.letterType',
             url: '$letterCopies.url',
             uploadedBy: '$letterCopies.uploadedBy',
             uploadedAt: '$letterCopies.uploadedAt',
@@ -268,10 +391,34 @@ const adminController = {
       ]);
 
       res.json(
-        letters.map((row) => ({
-          ...row,
-          downloadUrl: toDownloadUrl(row.url, row.filename),
-        }))
+        letters.map((row) => {
+          const resolvedType =
+            String(row.letterType || '').trim() ||
+            inferLetterType(row.letterName, row.filename, row.url);
+
+          const displayLetterName =
+            resolveLetterDisplayName({
+              letterType: resolvedType,
+              letterName: row.letterName,
+              filename: row.filename,
+              url: row.url,
+            }) || '';
+
+          const displayFilename = ensurePdfFilename(displayLetterName);
+          // Prefer the name written on the letter; do not fall back to account name
+          const letterPersonName = String(row.candidateName || '').trim();
+
+          return {
+            ...row,
+            userName: letterPersonName || '',
+            accountName: row.userName,
+            candidateName: letterPersonName,
+            letterType: resolvedType || row.letterType || '',
+            letterName: displayLetterName,
+            filename: displayFilename,
+            downloadUrl: toDownloadUrl(row.url, displayFilename),
+          };
+        })
       );
     } catch (err) {
       console.error('Error fetching all letters:', err);
@@ -281,8 +428,8 @@ const adminController = {
 
   /**
    * Proxy letter PDF download through our API so the browser gets
-   * Content-Type: application/pdf + Content-Disposition: attachment.
-   * Query: ?url=<cloudinaryUrl>&filename=offer.pdf
+   * Content-Type: application/pdf + Content-Disposition.
+   * Query: ?url=<cloudinaryUrl>&filename=offer.pdf&inline=1
    */
   downloadLetter: async (req, res) => {
     try {
@@ -297,7 +444,9 @@ const adminController = {
       }
 
       const filename = ensurePdfFilename(req.query.filename || 'letter.pdf');
-      const fetchUrl = toDownloadUrl(sourceUrl, filename);
+      const inline = String(req.query.inline || '') === '1';
+      // For inline view, fetch the raw Cloudinary URL (no fl_attachment)
+      const fetchUrl = inline ? sourceUrl : toDownloadUrl(sourceUrl, filename);
 
       const upstream = await axios.get(fetchUrl, {
         responseType: 'arraybuffer',
@@ -306,6 +455,24 @@ const adminController = {
       });
 
       if (upstream.status >= 400) {
+        // Retry without fl_attachment if attachment transform failed
+        if (!inline && fetchUrl !== sourceUrl) {
+          const retry = await axios.get(sourceUrl, {
+            responseType: 'arraybuffer',
+            validateStatus: () => true,
+            timeout: 30000,
+          });
+          if (retry.status < 400) {
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader(
+              'Content-Disposition',
+              `attachment; filename="${filename.replace(/"/g, '')}"`
+            );
+            res.setHeader('Cache-Control', 'private, max-age=60');
+            return res.status(200).send(Buffer.from(retry.data));
+          }
+        }
+
         const hint =
           upstream.status === 401 || upstream.status === 404
             ? 'Cloudinary may still be blocking PDF delivery. Enable “Allow delivery of PDF and ZIP files” in Cloudinary → Settings → Security, then re-upload the letter.'
@@ -319,7 +486,7 @@ const adminController = {
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${filename.replace(/"/g, '')}"`
+        `${inline ? 'inline' : 'attachment'}; filename="${filename.replace(/"/g, '')}"`
       );
       res.setHeader('Cache-Control', 'private, max-age=60');
       return res.status(200).send(Buffer.from(upstream.data));
