@@ -68,7 +68,7 @@ try {
 
 // Ping Route
 app.get('/ping', (req, res) => res.send('pong'));
-app.get('/version', (req, res) => res.json({ build: 'backend-deploy-v26-register-multipart-fix' }));
+app.get('/version', (req, res) => res.json({ build: 'backend-deploy-v27-register-availability-check' }));
 
 // Route Mounts 
 app.use('/attendance', require('./routes/attendanceRoutes'));
