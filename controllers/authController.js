@@ -47,6 +47,75 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizePhone(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function normalizeAadhar(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function isEmailTakenByUser(user) {
+  if (!user) return false;
+  if (user.isActive !== false) return true;
+  if (user.offerLetter?.status === 'Accepted') return true;
+  // Inactive offer-in-progress still blocks re-register with same email
+  return true;
+}
+
+async function findAvailabilityConflicts({ email, phone, aadharNumber }) {
+  const conflicts = {};
+
+  if (email) {
+    const emailNorm = normalizeEmail(email);
+    const [existingUser, existingPending] = await Promise.all([
+      User.findOne({ email: emailNorm }).select('_id isActive offerLetter'),
+      PendingUser.findOne({ email: emailNorm }).select('_id'),
+    ]);
+    if (existingPending || isEmailTakenByUser(existingUser)) {
+      conflicts.email = 'This email ID already exists. Please use a different email.';
+    }
+  }
+
+  if (phone) {
+    const phoneNorm = normalizePhone(phone);
+    if (phoneNorm.length === 10) {
+      const [existingUser, existingPending] = await Promise.all([
+        User.findOne({ phone: phoneNorm }).select('_id'),
+        PendingUser.findOne({ phone: phoneNorm }).select('_id'),
+      ]);
+      if (existingUser || existingPending) {
+        conflicts.phone = 'This mobile number already exists. Please use a different number.';
+      }
+    }
+  }
+
+  if (aadharNumber) {
+    const aadharNorm = normalizeAadhar(aadharNumber);
+    if (aadharNorm.length === 12) {
+      const aadharRegex = new RegExp(`^\\D*${aadharNorm.split('').join('\\D*')}\\D*$`);
+      const [existingUser, existingPending] = await Promise.all([
+        User.findOne({ aadharNumber: aadharRegex }).select('_id aadharNumber'),
+        PendingUser.findOne({ aadharNumber: aadharRegex }).select('_id aadharNumber'),
+      ]);
+      const userMatch =
+        existingUser && normalizeAadhar(existingUser.aadharNumber) === aadharNorm;
+      const pendingMatch =
+        existingPending && normalizeAadhar(existingPending.aadharNumber) === aadharNorm;
+      if (userMatch || pendingMatch) {
+        conflicts.aadharNumber =
+          'This Aadhaar number already exists. Please check and try again.';
+      }
+    }
+  }
+
+  return conflicts;
+}
+
 function formatTotalExperience(years, isFresher) {
   if (years == null || years === '' || Number.isNaN(Number(years))) {
     return isFresher ? '0 years' : 'N/A';
@@ -89,6 +158,29 @@ const authController = {
       });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  checkAvailability: async (req, res) => {
+    try {
+      const email = req.query.email || req.body?.email;
+      const phone = req.query.phone || req.body?.phone;
+      const aadharNumber = req.query.aadharNumber || req.body?.aadharNumber;
+
+      if (!email && !phone && !aadharNumber) {
+        return res.status(400).json({
+          error: 'Provide at least one of email, phone, or aadharNumber.',
+        });
+      }
+
+      const conflicts = await findAvailabilityConflicts({ email, phone, aadharNumber });
+      return res.json({
+        available: Object.keys(conflicts).length === 0,
+        conflicts,
+      });
+    } catch (error) {
+      console.error('checkAvailability error:', error);
+      return res.status(500).json({ error: 'Failed to check availability' });
     }
   },
 
@@ -205,23 +297,20 @@ const authController = {
         ? ''
         : (previousWorkExperience || legacyFromWork.previousWorkExperience || '');
 
-      // Check duplicates — include inactive users prepared for offer
-      const existingUser = await User.findOne({ email });
-      const existingPending = await PendingUser.findOne({ email });
-
-      if (existingPending) {
-        return res.status(400).json({ error: 'Email already in use or pending approval' });
+      // Check duplicates — email, mobile, Aadhaar (User + PendingUser)
+      const conflicts = await findAvailabilityConflicts({
+        email,
+        phone,
+        aadharNumber,
+      });
+      if (conflicts.email) {
+        return res.status(400).json({ error: conflicts.email });
       }
-      if (existingUser && existingUser.isActive !== false) {
-        return res.status(400).json({ error: 'Email already in use or pending approval' });
+      if (conflicts.phone) {
+        return res.status(400).json({ error: conflicts.phone });
       }
-      if (existingUser && existingUser.isActive === false && existingUser.offerLetter?.status === 'Accepted') {
-        return res.status(400).json({ error: 'Email already in use or pending approval' });
-      }
-      if (existingUser && existingUser.isActive === false) {
-        return res.status(400).json({
-          error: 'A registration for this email is already in progress. Please contact admin.',
-        });
+      if (conflicts.aadharNumber) {
+        return res.status(400).json({ error: conflicts.aadharNumber });
       }
 
       const profileFile = req.files?.profilePic?.[0];
